@@ -229,23 +229,19 @@ export class TerrainModule implements GameModule {
           const macro = f.elevation.macro(x, z);
           const hiY = lerp(hiA, hiB, t) * LEVEL_STEP + macro;
           const loY = lerp(loA, loB, t) * LEVEL_STEP + macro;
-          let y = lerp(hiY, loY, kt);
+          const y = lerp(hiY, loY, kt);
 
-          // Rock profile: bow the middle of the face outward, keep the top and
-          // bottom rows exact so the wall stays welded to both plateaus.
-          const interior = Math.sin(Math.PI * kt) * Math.sin(Math.PI * Math.min(1, Math.max(0, t)));
+          // Rock profile: bow the middle of the face outward. The bulge is
+          // forced to zero on the top and bottom rows so the wall stays exactly
+          // welded to the plateau above and the terrace below.
+          // Taper the bulge at the ends of the span as well, so two walls
+          // meeting at an inside corner cannot interpenetrate into a sliver.
+          const endTaper = Math.min(1, t / 0.18) * Math.min(1, (1 - t) / 0.18);
+          const interior = Math.sin(Math.PI * kt) * endTaper;
           const n1 = f.elevation.macro(x * 2.3 + 91, z * 2.3 - 47);
-          const bulge = k === 0 ? 0 : interior * (0.34 + n1 * 0.6);
-          let px = x + nx * bulge;
-          let pz = z + nz * bulge;
-
-          if (k === 0) {
-            // Overhanging lip.
-            px = x + nx * 0.34;
-            pz = z + nz * 0.34;
-            y += 0.12;
-          }
-          if (k > 0 && k < VS) y += n1 * 0.35;
+          const bulge = interior * (0.3 + n1 * 0.42);
+          const px = x + nx * bulge;
+          const pz = z + nz * bulge;
 
           positions.push(px, y, pz);
           // Cliff faces darken toward their base; the horizon AO already knows
@@ -285,9 +281,9 @@ export class TerrainModule implements GameModule {
           const theirA = f.corners[n];
           const theirB = f.corners[n + 3];
           if (mineA - theirA > WALL_EPS || mineB - theirB > WALL_EPS) {
-            emitWall(x1, z0, x1, z1, mineA, mineB, theirA, theirB, 1, 0);
+            emitWall(x1, z0, x1, z1, mineA, mineB, theirA, theirB, 1, 0, true);
           } else if (theirA - mineA > WALL_EPS || theirB - mineB > WALL_EPS) {
-            emitWall(x1, z0, x1, z1, theirA, theirB, mineA, mineB, -1, 0);
+            emitWall(x1, z0, x1, z1, theirA, theirB, mineA, mineB, -1, 0, false);
           }
         }
 
@@ -299,9 +295,9 @@ export class TerrainModule implements GameModule {
           const theirA = f.corners[n];
           const theirB = f.corners[n + 1];
           if (mineA - theirA > WALL_EPS || mineB - theirB > WALL_EPS) {
-            emitWall(x0, z1, x1, z1, mineA, mineB, theirA, theirB, 0, 1);
+            emitWall(x0, z1, x1, z1, mineA, mineB, theirA, theirB, 0, 1, false);
           } else if (theirA - mineA > WALL_EPS || theirB - mineB > WALL_EPS) {
-            emitWall(x0, z1, x1, z1, theirA, theirB, mineA, mineB, 0, -1);
+            emitWall(x0, z1, x1, z1, theirA, theirB, mineA, mineB, 0, -1, true);
           }
         }
       }

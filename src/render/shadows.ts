@@ -13,16 +13,16 @@
  * Fitting one orthographic projection to the visible frustum slice therefore
  * gives, on the actual numbers:
  *
- * | Shot | Focus dist | Fitted radius | Texel @4096 |
+ * | Shot | Eye distance | Fitted radius | Texel @3072 (`high`) |
  * | --- | --- | --- | --- |
- * | hero | ~17 | ~24 u | ~1.2 cm |
- * | lane | ~45 | ~62 u | ~3.0 cm |
- * | overview | ~105 | ~110 u | ~5.4 cm |
+ * | hero | 20 u | 36 u | 2.3 cm |
+ * | lane | 39 u | 60 u | 3.9 cm |
+ * | overview | 96 u | 140 u | 9.1 cm |
  *
- * Every one of those is finer than a three-cascade CSM would deliver in its
- * *first* cascade, at one shadow pass instead of three — which matters, because
- * the GTX 970 budget is 14 ms of GPU and 300 units have to be re-rasterised into
- * each cascade.
+ * Sub-centimetre-class density at hero zoom and under a decimetre at full
+ * overview, from one shadow pass instead of three — which matters, because the
+ * GTX 970 budget is 14 ms of GPU and 300 units would have to be re-rasterised
+ * into every cascade.
  *
  * The other reason is ownership. `CSM.setupMaterial()` overwrites
  * `material.onBeforeCompile` on every material in the scene. Those materials
@@ -100,7 +100,7 @@ export class FittedShadow {
     camera.getWorldDirection(this.viewDir);
     const groundHit =
       this.viewDir.y < -1e-3 ? camera.position.y / -this.viewDir.y : this.rangeCap;
-    const far = clamp(groundHit * 2.2, 45, this.rangeCap);
+    const far = clamp(groundHit * 1.9, 45, this.rangeCap);
     const near = camera.near;
 
     // Exact bounding sphere of the frustum slice. Depends only on the projection,

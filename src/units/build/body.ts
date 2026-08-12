@@ -295,24 +295,25 @@ export function addBody(b: CharacterBuilder, rig: Rig, o: BodyOptions): void {
     );
 
     // Boots: the widest, heaviest thing on the character below the waist.
+    // Built in ankle-local space, so y = 0 is the ankle and y = -drop the sole.
     const bs = p.height * 0.062 * (o.bootScale ?? 1);
     const footLen = p.footLength;
-    const ankle = rw(rig, 'ankle.L');
-    const groundDrop = ankle[1];
+    const drop = rw(rig, 'ankle.L')[1];
+    const sole = -drop;
     b.add(
       loft(
         [
-          { y: 0, z: footLen * 0.32, w: bs * 1.0, d: footLen * 0.78, round: 5 },
-          { y: groundDrop * 0.42, z: footLen * 0.2, w: bs * 1.12, d: footLen * 0.72, round: 5 },
-          { y: groundDrop * 0.9, z: footLen * 0.05, w: bs * 1.24, d: bs * 1.3, round: 5 },
-          { y: groundDrop * 1.05, z: -bs * 0.1, w: bs * 1.15, d: bs * 1.15, round: 4 },
-        ].reverse().map((r) => ({ ...r, y: -r.y })),
+          { y: sole, z: footLen * (o.digitigrade ? 0.62 : 0.34), w: bs * 1.06, d: footLen * 0.8, round: 5 },
+          { y: sole + drop * 0.28, z: footLen * (o.digitigrade ? 0.46 : 0.22), w: bs * 1.22, d: footLen * 0.74, round: 5 },
+          { y: sole + drop * 0.72, z: footLen * 0.06, w: bs * 1.3, d: bs * 1.34, round: 5 },
+          { y: 0, z: -bs * 0.06, w: bs * 1.12, d: bs * 1.16, round: 4 },
+          { y: drop * 0.34, z: -bs * 0.02, w: bs * 0.94, d: bs * 0.98, round: 4 },
+        ],
         { segments: 10, smoothAngle: 46 },
       ),
       {
         slot: o.bootSlot ?? o.limbSlot,
         bone: 'ankle.L',
-        at: [0, 0, 0],
         mirror: true,
         bind: { bones: ['ankle.L', 'toe.L'], rigid: true },
         uvScale: 1.1,

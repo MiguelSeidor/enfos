@@ -1,17 +1,40 @@
 /**
  * Render pipeline. Owner: RENDER agent.
  *
- * Pipeline stages, in order:
- *   scene → RenderPass → N8AO (GTAO) → SelectiveBloom → ToneMapping(ACES) → SMAA
+ * ## Pass order, and why it is this order
  *
- * Lighting is physically based and driven by a procedurally generated sky IBL,
- * so materials sit in a consistent light rig without shipping any HDR asset.
+ * ```
+ *  0  RenderPass          scene -> linear HDR (half float)
+ *  1  N8AOPostPass        GTAO, multiplied into the beauty buffer
+ *  2  EffectPass          AtmosphereEffect -> SceneGradeEffect        (still linear HDR)
+ *  3  EffectPass          Bloom -> ToneMapping(ACES) -> FilmGrade -> Vignette   (-> LDR)
+ *  4  EffectPass          SMAA
+ *  5  EffectPass          Sharpen
+ * ```
+ *
+ * The splits are not arbitrary. `postprocessing` merges the effects inside one
+ * `EffectPass` into a single shader, chaining each effect's output into the next
+ * — but only for effects that read the running colour. Bloom, SMAA and Sharpen
+ * each sample `inputBuffer` themselves, so they see the pass *input*, not the
+ * running colour. Putting all six effects in one pass, as the v0 baseline did,
+ * meant SMAA was blending raw pre-tone-map HDR texels back over the graded
+ * image along every edge, and bloom was thresholding un-exposed values. Each of
+ * those three effects therefore gets a pass boundary in front of it.
+ *
+ * Scene-linear grading happens in pass 2 so that pass 3's bloom threshold is
+ * expressed in the same exposed units the tone curve will see.
+ *
+ * ## Budget
+ *
+ * Target is a GTX 970 at 1920x1080: <= 14 ms GPU, <= 700 draw calls. Four
+ * fullscreen effect passes cost roughly 1.2 ms of that at native resolution,
+ * which is the price of getting the colour pipeline correct.
  */
 
 import * as THREE from 'three';
-import { Sky } from 'three/addons/objects/Sky.js';
 import {
   BloomEffect,
+  BlendFunction,
   EffectComposer,
   EffectPass,
   RenderPass,
@@ -20,68 +43,97 @@ import {
   ToneMappingEffect,
   ToneMappingMode,
   VignetteEffect,
-  BlendFunction,
 } from 'postprocessing';
 import { N8AOPostPass } from 'n8ao';
 import type { GameContext, GameModule, Vec2 } from '@/core/contracts';
 import { RenderKey, type RenderService } from '@/core/services';
 import { clamp, damp } from '@/core/mathx';
+import { LightRig, MOOD_AMBER_STORM, type MoodPreset } from './lighting';
+import { FittedShadow } from './shadows';
+import { AtmosphereEffect } from './effects/atmosphere';
+import { FilmGradeEffect, SceneGradeEffect } from './effects/grade';
+import { SharpenEffect } from './effects/sharpen';
 
 export type QualityTier = 'low' | 'medium' | 'high' | 'ultra';
 
 interface QualitySettings {
   shadowMapSize: number;
-  shadowDistance: number;
+  /** Furthest distance from the camera at which shadows are still resolved. */
+  shadowRange: number;
   pixelRatioCap: number;
   ao: boolean;
   aoQuality: 'Performance' | 'Low' | 'Medium' | 'High' | 'Ultra';
+  aoHalfRes: boolean;
   bloom: boolean;
   smaa: SMAAPreset;
+  /** 0 disables the sharpen pass entirely. */
+  sharpen: number;
   anisotropy: number;
 }
 
 const QUALITY: Record<QualityTier, QualitySettings> = {
   low: {
     shadowMapSize: 1024,
-    shadowDistance: 60,
+    shadowRange: 90,
     pixelRatioCap: 1,
     ao: false,
     aoQuality: 'Performance',
-    bloom: true,
+    aoHalfRes: true,
+    bloom: false,
     smaa: SMAAPreset.LOW,
-    anisotropy: 2,
+    sharpen: 0,
+    anisotropy: 1,
   },
   medium: {
     shadowMapSize: 2048,
-    shadowDistance: 90,
-    pixelRatioCap: 1.25,
+    shadowRange: 130,
+    pixelRatioCap: 1,
     ao: true,
     aoQuality: 'Low',
+    aoHalfRes: true,
     bloom: true,
     smaa: SMAAPreset.MEDIUM,
+    sharpen: 0.35,
     anisotropy: 4,
   },
   high: {
     shadowMapSize: 3072,
-    shadowDistance: 120,
-    pixelRatioCap: 1.5,
+    shadowRange: 160,
+    pixelRatioCap: 1.25,
     ao: true,
     aoQuality: 'Medium',
+    aoHalfRes: false,
     bloom: true,
     smaa: SMAAPreset.HIGH,
+    sharpen: 0.5,
     anisotropy: 8,
   },
   ultra: {
     shadowMapSize: 4096,
-    shadowDistance: 160,
-    pixelRatioCap: 2,
+    shadowRange: 200,
+    pixelRatioCap: 1.5,
     ao: true,
     aoQuality: 'High',
+    aoHalfRes: false,
     bloom: true,
     smaa: SMAAPreset.ULTRA,
+    sharpen: 0.55,
     anisotropy: 16,
   },
 };
+
+/** Material texture slots worth an anisotropic sampler. */
+const ANISOTROPIC_SLOTS = [
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'aoMap',
+  'emissiveMap',
+  'bumpMap',
+  'alphaMap',
+  'displacementMap',
+] as const;
 
 export class RenderModule implements GameModule {
   readonly id = 'render';
@@ -90,26 +142,46 @@ export class RenderModule implements GameModule {
   private composer!: EffectComposer;
   private aoPass?: N8AOPostPass;
   private bloom!: BloomEffect;
-  private sun!: THREE.DirectionalLight;
-  private sky!: Sky;
-  private pmrem!: THREE.PMREMGenerator;
-  private envRT?: THREE.WebGLRenderTarget;
+  private smaa!: SMAAEffect;
+  private sharpen!: SharpenEffect;
+  private sharpenPass!: EffectPass;
+  private atmosphere!: AtmosphereEffect;
+  private sceneGrade!: SceneGradeEffect;
+  private filmGrade!: FilmGradeEffect;
+  private lights!: LightRig;
+  private shadow!: FittedShadow;
+
   private tier: QualityTier = 'high';
-  private readonly sunTarget = new THREE.Object3D();
+  private mood: MoodPreset = MOOD_AMBER_STORM;
   private readonly projVec = new THREE.Vector3();
-  /** Exposure is eased so wave transitions do not pop. */
-  private targetExposure = 1;
+  private width = 1920;
+  private height = 1080;
+  /** Exposure is eased so wave transitions and ability flashes do not pop. */
+  private targetExposure = MOOD_AMBER_STORM.grade.exposure;
+  private currentExposure = MOOD_AMBER_STORM.grade.exposure;
 
   constructor(
     private readonly renderer: THREE.WebGLRenderer,
     private readonly scene: THREE.Scene,
     private readonly camera: THREE.PerspectiveCamera,
-  ) {}
+  ) {
+    // Set before any other module's init() runs, so every procedurally generated
+    // texture is created with the tier's anisotropy already applied. This is the
+    // only hook that reaches textures owned by other folders without touching
+    // their code.
+    THREE.Texture.DEFAULT_ANISOTROPY = Math.min(
+      QUALITY[this.tier].anisotropy,
+      renderer.capabilities.getMaxAnisotropy(),
+    );
+  }
 
   init(ctx: GameContext): void {
+    this.width = Math.max(1, this.renderer.domElement.width);
+    this.height = Math.max(1, this.renderer.domElement.height);
+
     this.setupRenderer();
-    this.setupSkyAndEnvironment();
-    this.setupLights();
+    this.lights = new LightRig(this.scene, this.renderer, this.mood);
+    this.shadow = new FittedShadow(this.lights.key);
     this.setupComposer();
     this.applyQuality(this.tier);
 
@@ -134,66 +206,16 @@ export class RenderModule implements GameModule {
     r.toneMapping = THREE.NoToneMapping; // handled in the composer for HDR fidelity
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
-    r.setClearColor(0x0b1018, 1);
+    r.setClearColor(0x0a0f16, 1);
     // The composer runs several passes per frame and each would clear the
     // counters, leaving only the final fullscreen triangle. The engine resets
     // once per frame instead, so the numbers cover the whole pipeline.
     r.info.autoReset = false;
-  }
 
-  private setupSkyAndEnvironment(): void {
-    this.pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.pmrem.compileEquirectangularShader();
-
-    this.sky = new Sky();
-    this.sky.scale.setScalar(20000);
-    const u = this.sky.material.uniforms;
-    // Late-afternoon fantasy key light: warm, long shadows, saturated horizon.
-    u.turbidity.value = 4.2;
-    u.rayleigh.value = 1.6;
-    u.mieCoefficient.value = 0.006;
-    u.mieDirectionalG.value = 0.82;
-
-    const elevation = 24 * (Math.PI / 180);
-    const azimuth = 128 * (Math.PI / 180);
-    const sunDir = new THREE.Vector3(
-      Math.cos(elevation) * Math.sin(azimuth),
-      Math.sin(elevation),
-      Math.cos(elevation) * Math.cos(azimuth),
-    );
-    u.sunPosition.value.copy(sunDir);
-    this.scene.add(this.sky);
-
-    this.refreshEnvironment();
-
-    this.scene.fog = new THREE.FogExp2(0x8ea3bd, 0.0032);
-  }
-
-  /** Re-bakes the IBL from the current sky. Call after changing sky uniforms. */
-  refreshEnvironment(): void {
-    this.envRT?.dispose();
-    this.envRT = this.pmrem.fromScene(this.sky as unknown as THREE.Scene, 0.04);
-    this.scene.environment = this.envRT.texture;
-    this.scene.environmentIntensity = 0.85;
-  }
-
-  private setupLights(): void {
-    const u = this.sky.material.uniforms;
-    const sunDir = u.sunPosition.value as THREE.Vector3;
-
-    this.sun = new THREE.DirectionalLight(0xffe8c4, 3.4);
-    this.sun.position.copy(sunDir).multiplyScalar(120);
-    this.sun.castShadow = true;
-    this.sun.shadow.bias = -0.0006;
-    this.sun.shadow.normalBias = 0.035;
-    this.sun.shadow.radius = 2.4;
-    this.scene.add(this.sun);
-    this.scene.add(this.sunTarget);
-    this.sun.target = this.sunTarget;
-
-    // Cool bounce from the sky opposite the key, keeps shadows readable.
-    const fill = new THREE.HemisphereLight(0xa8c8ff, 0x30302a, 0.55);
-    this.scene.add(fill);
+    // Aerial perspective is a post-process now: it needs depth, height and a view
+    // direction, none of which FogExp2 has. Leaving scene.fog set would tint
+    // everything a second time.
+    this.scene.fog = null;
   }
 
   private setupComposer(): void {
@@ -203,91 +225,139 @@ export class RenderModule implements GameModule {
     });
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
-    this.aoPass = new N8AOPostPass(
-      this.scene,
-      this.camera,
-      window.innerWidth,
-      window.innerHeight,
-    );
-    this.aoPass.configuration.aoRadius = 2.6;
-    this.aoPass.configuration.distanceFalloff = 1.1;
-    this.aoPass.configuration.intensity = 3.0;
-    this.aoPass.configuration.color = new THREE.Color(0x0a0d14);
-    this.aoPass.configuration.halfRes = true;
+    this.aoPass = new N8AOPostPass(this.scene, this.camera, this.width, this.height);
+    this.aoPass.configuration.aoRadius = 3.2;
+    this.aoPass.configuration.distanceFalloff = 1.4;
+    this.aoPass.configuration.intensity = 2.6;
+    this.aoPass.configuration.denoiseSamples = 8;
+    this.aoPass.configuration.denoiseRadius = 12;
+    // Occlusion tinted toward the shadow colour rather than pure black, so
+    // creases pick up the same cool cast as cast shadows do.
+    this.aoPass.configuration.color = new THREE.Color(0x0d1420);
     this.composer.addPass(this.aoPass);
 
+    // ── Pass 2: still scene-linear HDR ──
+    this.atmosphere = new AtmosphereEffect(this.camera, this.mood.atmosphere);
+    this.atmosphere.setSunDirection(this.lights.sunDirection);
+    this.sceneGrade = new SceneGradeEffect();
+    this.sceneGrade.apply(this.mood.grade);
+    this.composer.addPass(new EffectPass(this.camera, this.atmosphere, this.sceneGrade));
+
+    // ── Pass 3: HDR -> display ──
+    // The threshold is above 1.0 on purpose. After the scene grade, a lit surface
+    // tops out near 1.0; only genuine emitters exceed it. That makes this an
+    // emissive-only bloom without needing a selection list of objects owned by
+    // other subsystems, and it is why the frame does not smear.
     this.bloom = new BloomEffect({
       intensity: 0.85,
-      luminanceThreshold: 0.72,
-      luminanceSmoothing: 0.28,
+      luminanceThreshold: 1.05,
+      luminanceSmoothing: 0.1,
       mipmapBlur: true,
-      radius: 0.72,
+      radius: 0.55,
+      levels: 5,
     });
 
-    const tone = new ToneMappingEffect({
-      mode: ToneMappingMode.AGX,
-      resolution: 256,
-      whitePoint: 6.0,
-      middleGrey: 0.6,
-    });
+    const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
+
+    this.filmGrade = new FilmGradeEffect();
+    this.filmGrade.apply(this.mood.grade);
 
     const vignette = new VignetteEffect({
       blendFunction: BlendFunction.NORMAL,
       offset: 0.32,
-      darkness: 0.42,
+      darkness: 0.62,
     });
 
-    const smaa = new SMAAEffect({ preset: SMAAPreset.HIGH });
+    this.composer.addPass(
+      new EffectPass(this.camera, this.bloom, tone, this.filmGrade, vignette),
+    );
 
-    this.composer.addPass(new EffectPass(this.camera, this.bloom, tone, vignette, smaa));
+    // ── Pass 4: AA on the finished LDR image ──
+    // TAA was evaluated and rejected: this camera is damped rather than snapped,
+    // so it is in near-continuous sub-pixel motion, and unit meshes are
+    // instanced with per-frame transforms and no velocity buffer. Reprojection
+    // would ghost every moving unit against a static ground — exactly the case
+    // TAA handles worst — to fix shimmer that SMAA plus the fitted shadow snap
+    // already remove.
+    this.smaa = new SMAAEffect({ preset: SMAAPreset.HIGH });
+    this.composer.addPass(new EffectPass(this.camera, this.smaa));
+
+    // ── Pass 5: recover the detail SMAA softened ──
+    this.sharpen = new SharpenEffect(QUALITY[this.tier].sharpen);
+    this.sharpenPass = new EffectPass(this.camera, this.sharpen);
+    this.composer.addPass(this.sharpenPass);
   }
 
   applyQuality(tier: QualityTier): void {
     this.tier = tier;
     const q = QUALITY[tier];
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatioCap));
-    this.sun.shadow.mapSize.set(q.shadowMapSize, q.shadowMapSize);
-    this.sun.shadow.map?.dispose();
-    this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget;
 
-    const cam = this.sun.shadow.camera;
-    const half = q.shadowDistance * 0.5;
-    cam.left = -half;
-    cam.right = half;
-    cam.top = half;
-    cam.bottom = -half;
-    cam.near = 1;
-    cam.far = q.shadowDistance * 3;
-    cam.updateProjectionMatrix();
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatioCap));
+    this.shadow.configure(q.shadowMapSize, q.shadowRange);
+    this.applyAnisotropy(q.anisotropy);
 
     if (this.aoPass) {
       this.aoPass.enabled = q.ao;
       this.aoPass.setQualityMode(q.aoQuality);
-      this.aoPass.configuration.halfRes = tier === 'low' || tier === 'medium';
+      this.aoPass.configuration.halfRes = q.aoHalfRes;
     }
-    this.bloom.intensity = q.bloom ? 0.85 : 0;
+
+    // BlendFunction.DST makes the EffectPass drop the effect from the merged
+    // shader entirely rather than run it and discard the result, so disabling
+    // bloom actually removes its cost.
+    this.bloom.blendMode.blendFunction = q.bloom ? BlendFunction.SCREEN : BlendFunction.DST;
+
+    this.smaa.applyPreset(q.smaa);
+
+    this.sharpen.amount = q.sharpen;
+    this.sharpenPass.enabled = q.sharpen > 0;
   }
 
-  /** Keeps the shadow frustum tight around the camera focus for crisp contact. */
-  private followSun(): void {
-    const focus = this.camera.position;
-    this.sunTarget.position.set(focus.x, 0, focus.z);
-    const dir = (this.sky.material.uniforms.sunPosition.value as THREE.Vector3);
-    this.sun.position.set(
-      focus.x + dir.x * 120,
-      dir.y * 120,
-      focus.z + dir.z * 120,
-    );
+  private applyAnisotropy(level: number): void {
+    const value = Math.min(level, this.renderer.capabilities.getMaxAnisotropy());
+    THREE.Texture.DEFAULT_ANISOTROPY = value;
+    const seen = new Set<THREE.Texture>();
+    this.scene.traverse((obj) => {
+      const material = (obj as THREE.Mesh).material;
+      if (!material) return;
+      const list = Array.isArray(material) ? material : [material];
+      for (const m of list) {
+        const record = m as unknown as Record<string, unknown>;
+        for (const slot of ANISOTROPIC_SLOTS) {
+          const tex = record[slot];
+          if (!(tex instanceof THREE.Texture) || seen.has(tex)) continue;
+          seen.add(tex);
+          if (tex.anisotropy === value) continue;
+          tex.anisotropy = value;
+          tex.needsUpdate = true;
+        }
+      }
+    });
+  }
+
+  setMood(mood: MoodPreset): void {
+    this.mood = mood;
+    this.lights.applyMood(mood);
+    this.atmosphere.apply(mood.atmosphere);
+    this.atmosphere.setSunDirection(this.lights.sunDirection);
+    this.sceneGrade.apply(mood.grade);
+    this.filmGrade.apply(mood.grade);
+    this.targetExposure = mood.grade.exposure;
+    this.currentExposure = mood.grade.exposure;
   }
 
   update(dt: number): void {
-    this.followSun();
-    const exposure = damp(this.composer.getRenderer().toneMappingExposure ?? 1, this.targetExposure, 3, dt);
-    this.renderer.toneMappingExposure = exposure;
+    this.lights.followCamera(this.camera);
+    this.camera.updateMatrixWorld();
+    this.shadow.update(this.camera, this.lights.sunDirection);
+
+    this.currentExposure = damp(this.currentExposure, this.targetExposure, 3, dt);
+    this.sceneGrade.exposure = this.currentExposure;
   }
 
+  /** Scene-linear exposure multiplier. Eased over ~1/3 s. */
   setExposure(value: number): void {
-    this.targetExposure = clamp(value, 0.2, 3);
+    this.targetExposure = clamp(value, 0.2, 12);
   }
 
   render(_alpha: number, dt: number): void {
@@ -295,6 +365,8 @@ export class RenderModule implements GameModule {
   }
 
   resize(width: number, height: number): void {
+    this.width = width;
+    this.height = height;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
@@ -304,14 +376,18 @@ export class RenderModule implements GameModule {
 
   project(pos: Vec2, height: number, out: { x: number; y: number }): boolean {
     this.projVec.set(pos.x, height, pos.z).project(this.camera);
-    out.x = (this.projVec.x * 0.5 + 0.5) * window.innerWidth;
-    out.y = (-this.projVec.y * 0.5 + 0.5) * window.innerHeight;
+    out.x = (this.projVec.x * 0.5 + 0.5) * this.width;
+    out.y = (-this.projVec.y * 0.5 + 0.5) * this.height;
     return this.projVec.z < 1;
+  }
+
+  /** Diagnostics for the QA harness: how fine the shadow map currently is. */
+  get shadowTexelSize(): number {
+    return this.shadow.texelWorldSize;
   }
 
   dispose(): void {
     this.composer.dispose();
-    this.envRT?.dispose();
-    this.pmrem.dispose();
+    this.lights.dispose();
   }
 }

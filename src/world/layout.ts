@@ -249,7 +249,14 @@ export function createElevationField(seed: number): ElevationField {
 
     // 1. Regional relief. Amplitude below 0.5 so it perturbs terrace outlines
     //    into organic shapes without ever moving a plateau by a whole level.
-    let e = 1 + shape(u * 0.0165, v * 0.0165) * 0.46 + shape(u * 0.045, v * 0.045) * 0.16;
+    //    The high-frequency term is what stops the quantised boundaries from
+    //    running in long straight lines along the cell grid.
+    let e =
+      1 +
+      shape(u * 0.0165, v * 0.0165) * 0.46 +
+      shape(u * 0.045, v * 0.045) * 0.18 +
+      grain(u * 0.108, v * 0.108) * 0.24 +
+      grain(u * 0.21, v * 0.21) * 0.1;
 
     // 2. The land rises away from the middle: basin → highlands → far shelf.
     e += 2.15 * smoothstep((u - 54) / 20);
@@ -277,14 +284,20 @@ export function createElevationField(seed: number): ElevationField {
     }
 
     // 7. Rim mountains. Hard bound of the arena, tall enough to close the
-    //    horizon at every camera pitch.
-    const edge = Math.max(u, av) / MAP_HALF;
-    const rim = smoothstep((edge - 0.8) / 0.16);
-    e = Math.max(e, 1 + 7.2 * rim);
+    //    horizon at every camera pitch. A superellipse rather than a square,
+    //    with a noisy radius so the skyline is a mountain range not a wall.
+    const nu = u / MAP_HALF;
+    const nv = av / MAP_HALF;
+    const edge =
+      Math.pow(Math.pow(nu, 5) + Math.pow(nv, 5), 0.2) + shape(u * 0.03, v * 0.03) * 0.05;
+    const rim = smoothstep((edge - 0.79) / 0.15);
+    e = Math.max(e, 1 + 7.2 * rim + grain(u * 0.06, v * 0.06) * 2.4 * rim);
 
     // 8. Central gorge. Two terraces down to a river bed, closed at both ends
-    //    so the map still has a continuous outer plain.
-    const across = 1 - smoothstep((u - 6) / 8);
+    //    so the map still has a continuous outer plain. The channel meanders so
+    //    the mirror line reads as a river, not as a canal.
+    const meander = shape(v * 0.021, 3.7) * 3.4 + shape(v * 0.058, 8.1) * 1.5;
+    const across = 1 - smoothstep((u - meander - 6) / 8);
     const along = 1 - smoothstep((av - 58) / 14);
     const gorge = across * along;
     e = lerp(e, -1.75, gorge);

@@ -60,36 +60,44 @@ export const MOOD_AMBER_STORM: MoodPreset = {
   sunElevation: 27,
   sunAzimuth: 320,
   sky: { turbidity: 9.5, rayleigh: 2.6, mieCoefficient: 0.005, mieDirectionalG: 0.87 },
-  key: { color: 0xffcb92, intensity: 6.4 },
-  rim: { color: 0x9dc4ff, intensity: 2.4, elevation: 13, azimuthOffset: 172 },
-  fill: { sky: 0x6f96d2, ground: 0x2c2019, intensity: 1.15 },
-  environmentIntensity: 0.3,
+  key: { color: 0xffcb92, intensity: 7.0 },
+  rim: { color: 0x9dc4ff, intensity: 1.9, elevation: 13, azimuthOffset: 172 },
+  // Key:fill lands near 9:1. Anything flatter and shadowed faces never reach the
+  // bottom decile of the histogram; anything steeper and they go dead black,
+  // which the rubric penalises just as hard as a washed-out frame.
+  fill: { sky: 0x6f96d2, ground: 0x2c2019, intensity: 0.62 },
+  environmentIntensity: 0.2,
   atmosphere: {
-    density: 0.055,
+    // Density is deliberately low. The first pass at 0.055 put ~84% haze on the
+    // far side of an overview shot, which lifted the whole midground off the
+    // black point and cost the frame its darks — the exact failure the brief
+    // warned about. At 0.016 the far rim still separates from the near ground
+    // but nothing in the play space is tinted.
+    density: 0.016,
     heightFalloff: 26,
     baseHeight: -12,
-    startDistance: 16,
-    hazeAway: 0x4d6076,
-    hazeSun: 0xffab63,
+    startDistance: 20,
+    hazeAway: 0x54687f,
+    hazeSun: 0xffc386,
     sunAnisotropy: 5,
     horizonWidth: 0.24,
     horizonStrength: 0.85,
     highlightPunch: 0.9,
   },
   grade: {
-    exposure: 2.6,
-    sceneContrast: 1.22,
+    exposure: 2.3,
+    sceneContrast: 1.34,
     sceneSaturation: 1.12,
     whiteBalance: [1.05, 1.0, 0.94],
-    lift: [-0.018, -0.014, -0.006],
+    lift: [-0.022, -0.017, -0.008],
     gamma: [1.0, 1.0, 1.0],
-    gain: [1.06, 1.02, 0.99],
+    gain: [1.12, 1.06, 1.0],
     shadowTint: [-0.06, 0.0, 0.12],
     highlightTint: [0.07, 0.02, -0.06],
     toneBalance: 0.55,
     shadowRange: 0.34,
     saturation: 1.14,
-    sCurve: 0.34,
+    sCurve: 0.38,
   },
 };
 

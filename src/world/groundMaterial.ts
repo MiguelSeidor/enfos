@@ -188,8 +188,15 @@ export function createGroundMaterial(
     shader.uniforms.uNrm2 = { value: rock.normal };
     shader.uniforms.uNrm3 = { value: path.normal };
     // World units per texture tile, per layer.
-    shader.uniforms.uLayerScale = { value: new THREE.Vector4(5.5, 7.0, 9.0, 6.0) };
+    shader.uniforms.uLayerScale = { value: new THREE.Vector4(9.0, 12.5, 15.0, 8.5) };
     shader.uniforms.uLayerRough = { value: new THREE.Vector4(0.95, 0.98, 0.8, 0.92) };
+    // The four source textures are all mid-tone browns straight from the
+    // library. Separating them in hue and value is what makes the lane read as
+    // a lane from RTS height instead of dissolving into the dirt around it.
+    shader.uniforms.uTint0 = { value: new THREE.Color(0.86, 1.0, 0.74) };
+    shader.uniforms.uTint1 = { value: new THREE.Color(0.9, 0.84, 0.72) };
+    shader.uniforms.uTint2 = { value: new THREE.Color(1.06, 1.0, 0.9) };
+    shader.uniforms.uTint3 = { value: new THREE.Color(1.06, 1.0, 0.88) };
     shader.uniforms.uDetailScale = { value: 0.62 };
     shader.uniforms.uWaterLevel = { value: WATER_LEVEL };
 
@@ -206,6 +213,7 @@ export function createGroundMaterial(
         uniform sampler2D uNrm0; uniform sampler2D uNrm1; uniform sampler2D uNrm2; uniform sampler2D uNrm3;
         uniform vec4 uLayerScale;
         uniform vec4 uLayerRough;
+        uniform vec3 uTint0; uniform vec3 uTint1; uniform vec3 uTint2; uniform vec3 uTint3;
         uniform float uDetailScale;
         uniform float uWaterLevel;
         ${NOISE_GLSL}
@@ -232,10 +240,10 @@ export function createGroundMaterial(
         vec2 p2_ = vWorldPos.xz / uLayerScale.z;
         vec2 p3_ = vWorldPos.xz / uLayerScale.w;
 
-        gAlbedo = texture2D(uAlb0, p0_).rgb * w_.x
-                + texture2D(uAlb1, p1_).rgb * w_.y
-                + texture2D(uAlb2, p2_).rgb * w_.z
-                + texture2D(uAlb3, p3_).rgb * w_.w;
+        gAlbedo = texture2D(uAlb0, p0_).rgb * uTint0 * w_.x
+                + texture2D(uAlb1, p1_).rgb * uTint1 * w_.y
+                + texture2D(uAlb2, p2_).rgb * uTint2 * w_.z
+                + texture2D(uAlb3, p3_).rgb * uTint3 * w_.w;
 
         gNrmTS = (texture2D(uNrm0, p0_).xyz * 2.0 - 1.0) * w_.x
                + (texture2D(uNrm1, p1_).xyz * 2.0 - 1.0) * w_.y
@@ -264,6 +272,12 @@ export function createGroundMaterial(
         gAlbedo *= vec3(0.72) + tint_.rgb * 0.62;
         float macro_ = wFbm(vWorldPos.xz * 0.017);
         gAlbedo *= 0.80 + macro_ * 0.42;
+
+        // Gentle grade only. The library textures carry a lot of high-frequency
+        // speckle; pushing saturation hard turns that speckle into confetti.
+        float lum_ = dot(gAlbedo, vec3(0.2126, 0.7152, 0.0722));
+        gAlbedo = mix(vec3(lum_), gAlbedo, 0.86);
+        gAlbedo = clamp(gAlbedo, 0.0, 0.85);
 
         // Wet, darker ground where the river reaches the bank.
         float wet_ = 1.0 - smoothstep(0.0, 2.6, vWorldPos.y - uWaterLevel);
@@ -330,7 +344,7 @@ export function createCliffMaterial(): GroundMaterialResult {
     shader.uniforms.uStoneN = { value: stone.normal };
     shader.uniforms.uRock = { value: rock.albedo };
     shader.uniforms.uGrass = { value: grass.albedo };
-    shader.uniforms.uScale = { value: 7.5 };
+    shader.uniforms.uScale = { value: 15.0 };
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -361,11 +375,14 @@ export function createCliffMaterial(): GroundMaterialResult {
         vec3 az_ = texture2D(uStone, p_.xy).rgb;
         cAlbedo = ax_ * bw_.x + ay_ * bw_.y + az_ * bw_.z;
 
-        // Second, coarser rock octave breaks the tiling period.
-        vec3 bx_ = texture2D(uRock, p_.zy * 0.31).rgb;
-        vec3 by_ = texture2D(uRock, p_.xz * 0.31).rgb;
-        vec3 bz_ = texture2D(uRock, p_.xy * 0.31).rgb;
-        cAlbedo *= 0.55 + (bx_ * bw_.x + by_ * bw_.y + bz_ * bw_.z) * 1.05;
+        // Second, much coarser rock octave. Its period is incommensurate with
+        // the first, which is what stops the crack network from reading as a
+        // repeating stamp across a long cliff run.
+        vec3 q_ = p_ * 0.237;
+        vec3 bx_ = texture2D(uRock, q_.zy).rgb;
+        vec3 by_ = texture2D(uRock, q_.xz).rgb;
+        vec3 bz_ = texture2D(uRock, q_.xy).rgb;
+        cAlbedo = mix(cAlbedo, (bx_ * bw_.x + by_ * bw_.y + bz_ * bw_.z), 0.42);
 
         // Sedimentary strata: horizontal banding warped by noise, which is what
         // makes a generated cliff read as rock rather than as a displaced plane.
@@ -386,8 +403,13 @@ export function createCliffMaterial(): GroundMaterialResult {
         // Grass and moss creep over anything approaching horizontal.
         float cap_ = smoothstep(0.55, 0.9, wn_.y);
         cap_ *= 0.35 + 0.65 * smoothstep(0.35, 0.7, wFbm(vWorldPos.xz * 0.28));
-        vec3 capCol_ = texture2D(uGrass, vWorldPos.xz / 5.5).rgb;
-        cAlbedo = mix(cAlbedo, capCol_ * 0.95, cap_);
+        // The library stone ramp is a cold blue-grey; warm and desaturate it so
+        // rock reads as stone under a late-afternoon key rather than as ice.
+        float sl_ = dot(cAlbedo, vec3(0.2126, 0.7152, 0.0722));
+        cAlbedo = mix(vec3(sl_), cAlbedo, 0.45) * vec3(1.16, 1.04, 0.88);
+
+        vec3 capCol_ = texture2D(uGrass, vWorldPos.xz / 9.0).rgb;
+        cAlbedo = mix(cAlbedo, capCol_ * vec3(0.9, 0.98, 0.78), cap_);
         cWorldN = normalize(mix(cWorldN, wn_, cap_ * 0.7));
         cRough = mix(cRough, 0.96, cap_);
 

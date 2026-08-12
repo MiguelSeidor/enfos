@@ -176,30 +176,51 @@ export class CharacterBuilder {
     return a;
   }
 
-  /** Merges every slot into one geometry with one material group per slot. */
+  /**
+   * Merges every slot into one indexed geometry with one material group per
+   * slot. Vertices are welded within a slot — identical position, normal, uv and
+   * skin binding collapse to one — which typically removes two thirds of the
+   * vertices the part builders emit. That matters twice: it shrinks the vertex
+   * shader cost for heroes, and it directly divides the memory of the creep
+   * vertex-animation textures, which are sized `uniqueVertices × frames`.
+   */
   build(): { geometry: THREE.BufferGeometry; materials: THREE.MeshStandardMaterial[] } {
     const position: number[] = [];
     const normal: number[] = [];
     const uv: number[] = [];
     const skinIndex: number[] = [];
     const skinWeight: number[] = [];
+    const indices: number[] = [];
     const mats: THREE.MeshStandardMaterial[] = [];
     const geometry = new THREE.BufferGeometry();
 
-    let start = 0;
     let materialIndex = 0;
     for (const slot of SLOT_ORDER) {
       const a = this.slots.get(slot);
       if (!a || a.position.length === 0) continue;
-      const verts = a.position.length / 3;
-      pushAll(position, a.position);
-      pushAll(normal, a.normal);
-      pushAll(uv, a.uv);
-      pushAll(skinIndex, a.skinIndex);
-      pushAll(skinWeight, a.skinWeight);
-      geometry.addGroup(start, verts, materialIndex);
+
+      const vertexOffset = position.length / 3;
+      const indexStart = indices.length;
+      const lookup = new Map<string, number>();
+      const count = a.position.length / 3;
+
+      for (let i = 0; i < count; i++) {
+        const key = weldKey(a, i);
+        let local = lookup.get(key);
+        if (local === undefined) {
+          local = position.length / 3 - vertexOffset;
+          lookup.set(key, local);
+          position.push(a.position[i * 3]!, a.position[i * 3 + 1]!, a.position[i * 3 + 2]!);
+          normal.push(a.normal[i * 3]!, a.normal[i * 3 + 1]!, a.normal[i * 3 + 2]!);
+          uv.push(a.uv[i * 2]!, a.uv[i * 2 + 1]!);
+          for (let k = 0; k < 4; k++) skinIndex.push(a.skinIndex[i * 4 + k]!);
+          for (let k = 0; k < 4; k++) skinWeight.push(a.skinWeight[i * 4 + k]!);
+        }
+        indices.push(vertexOffset + local);
+      }
+
+      geometry.addGroup(indexStart, indices.length - indexStart, materialIndex);
       mats.push(this.materialFor(slot));
-      start += verts;
       materialIndex++;
     }
 
@@ -210,6 +231,7 @@ export class CharacterBuilder {
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4));
     geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeight, 4));
+    geometry.setIndex(indices);
     geometry.computeBoundingBox();
     geometry.computeBoundingSphere();
     return { geometry, materials: mats };
@@ -255,8 +277,18 @@ function pushVertex(
   );
 }
 
-function pushAll(dst: number[], src: number[]): void {
-  for (let i = 0; i < src.length; i++) dst.push(src[i]!);
+/** Weld key: position, normal, uv and skin binding must all match to merge. */
+function weldKey(a: SlotAccum, i: number): string {
+  const p = 1e4;
+  const n = 1e3;
+  const t = 1e3;
+  return (
+    `${Math.round(a.position[i * 3]! * p)},${Math.round(a.position[i * 3 + 1]! * p)},${Math.round(a.position[i * 3 + 2]! * p)}|` +
+    `${Math.round(a.normal[i * 3]! * n)},${Math.round(a.normal[i * 3 + 1]! * n)},${Math.round(a.normal[i * 3 + 2]! * n)}|` +
+    `${Math.round(a.uv[i * 2]! * t)},${Math.round(a.uv[i * 2 + 1]! * t)}|` +
+    `${a.skinIndex[i * 4]},${a.skinIndex[i * 4 + 1]},${a.skinIndex[i * 4 + 2]},${a.skinIndex[i * 4 + 3]}|` +
+    `${Math.round(a.skinWeight[i * 4]! * 255)},${Math.round(a.skinWeight[i * 4 + 1]! * 255)}`
+  );
 }
 
 function swapSide(name: string): string {

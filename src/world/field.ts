@@ -464,8 +464,10 @@ export function splatAt(field: TerrainFieldData, x: number, z: number, out: Floa
   const shoulder = clamp01(1 - smoothstep((laneD - 9) / 7)) * (1 - path);
   const shore = clamp01(1 - smoothstep((Math.abs(depth) - 1.1) / 2.0));
   const apron = smoothstep((slope - 0.17) / 0.2) * (1 - steep);
-  const plaza = clamp01(1 - smoothstep((field.landmarkDistance(x, z) - 2) / 6));
-  let dirt = clamp01(Math.max(shoulder, shore * 0.85, apron, plaza * 0.8));
+  // Landmark plazas are trodden bare only in their inner half; leaving the
+  // outer ring green keeps the pads from bleeding into one brown smear.
+  const plaza = clamp01(1 - smoothstep((field.landmarkDistance(x, z) + 5) / 4));
+  let dirt = clamp01(Math.max(shoulder, shore * 0.85, apron, plaza * 0.75));
 
   rock = clamp01(rock);
   dirt = clamp01(dirt * (1 - rock * 0.65));

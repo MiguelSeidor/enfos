@@ -1,9 +1,33 @@
 /**
- * Top-down / isometric RTS camera (GDD §17).
+ * Top-down / isometric RTS camera (GDD §17). Owner: RENDER agent.
  *
  * Edge-scroll + WASD pan, wheel zoom on a curve that also pitches the camera,
  * middle-drag rotate, smooth follow, and a screen-shake channel driven by VFX.
  * All motion is exponentially damped so it stays smooth at any frame rate.
+ *
+ * ## The zoom curve
+ *
+ * Distance is **geometric**, not linear: `d = near * (far/near)^t`. A linear
+ * distance ramp is the classic RTS camera mistake — every wheel notch moves the
+ * camera the same number of world units, so near the ground a notch is a violent
+ * lurch and up at overview height the same notch does almost nothing. Geometric
+ * spacing makes every notch the same *proportional* change (~18% here), which is
+ * what the eye actually reads as a uniform zoom step.
+ *
+ * Pitch and focal length ride along with it:
+ *
+ * | | close (t=0) | far (t=1) |
+ * | --- | --- | --- |
+ * | distance | 17 u | 105 u |
+ * | pitch | 33° | 56° |
+ * | fov | 36° | 46° |
+ *
+ * Pitching up as you zoom out is what separates a tactical overview from a
+ * cinematic hero shot. The focal length moves the opposite way to the pitch: a
+ * longer lens (narrower fov) at hero distance compresses depth and flatters
+ * character silhouettes, a wider one at overview restores peripheral awareness.
+ * Pitch is eased with a smoothstep so it settles gently at both extremes while
+ * distance keeps its uniform notch feel.
  */
 
 import * as THREE from 'three';
@@ -32,21 +56,30 @@ export class RtsCamera {
   private shakeDuration = 0;
   private followId: number | null = null;
   private readonly shakeOffset = new THREE.Vector3();
+  private readonly target = new THREE.Vector3();
   private limits: CameraLimits = { minX: -120, maxX: 120, minZ: -120, maxZ: 120 };
   private heightSampler: ((x: number, z: number) => number) | null = null;
 
-  // Zoom curve endpoints. Distance and pitch move together so the far view reads
-  // as a classic RTS overview and the near view as a cinematic hero shot.
-  private readonly nearDistance = 22;
-  private readonly farDistance = 78;
-  private readonly nearPitch = 38 * (Math.PI / 180);
-  private readonly farPitch = 62 * (Math.PI / 180);
+  // Zoom curve endpoints. See the class comment for why distance is geometric.
+  private readonly nearDistance = 17;
+  private readonly farDistance = 105;
+  private readonly nearPitch = 33 * (Math.PI / 180);
+  private readonly farPitch = 56 * (Math.PI / 180);
+  private readonly nearFov = 36;
+  private readonly farFov = 46;
+  private readonly distanceRatio = this.farDistance / this.nearDistance;
+  /** Minimum height the eye keeps above whatever terrain is under it. */
+  private readonly clearance = 4;
 
-  panSpeed = 34;
+  panSpeed = 0.85;
   edgeScrollEnabled = true;
 
   constructor(aspect: number) {
-    this.camera = new THREE.PerspectiveCamera(48, aspect, 0.5, 2200);
+    // near/far are tight around the actual play volume. The v0 range of
+    // 0.5..2200 spent depth precision on space nothing occupies, which shows up
+    // as noise in the AO and the depth-reconstructed fog. Sky.js forces its own
+    // fragments to the far plane, so it is unaffected by the shorter far.
+    this.camera = new THREE.PerspectiveCamera(this.nearFov, aspect, 1, 1400);
     this.apply(0);
   }
 
@@ -67,10 +100,12 @@ export class RtsCamera {
   }
 
   pan(dx: number, dz: number, dt: number): void {
-    // Pan in camera space so movement matches what the player sees when rotated.
+    // Pan in camera space so movement matches what the player sees when rotated,
+    // and scale by eye distance so the on-screen pan rate is constant regardless
+    // of zoom.
     const cos = Math.cos(this.yaw);
     const sin = Math.sin(this.yaw);
-    const speed = this.panSpeed * lerp(0.55, 1.7, this.zoom) * dt;
+    const speed = this.panSpeed * this.distanceAt(this.zoom) * dt;
     this.desiredFocus.x += (dx * cos - dz * sin) * speed;
     this.desiredFocus.z += (dx * sin + dz * cos) * speed;
     this.clampFocus();
@@ -123,6 +158,10 @@ export class RtsCamera {
     this.desiredFocus.z = clamp(this.desiredFocus.z, this.limits.minZ, this.limits.maxZ);
   }
 
+  private distanceAt(t: number): number {
+    return this.nearDistance * Math.pow(this.distanceRatio, t);
+  }
+
   update(dt: number, followPos?: Vec2): void {
     if (this.followId !== null && followPos) {
       this.desiredFocus.set(followPos.x, 0, followPos.z);
@@ -131,8 +170,10 @@ export class RtsCamera {
 
     this.focus.x = damp(this.focus.x, this.desiredFocus.x, 9, dt);
     this.focus.z = damp(this.focus.z, this.desiredFocus.z, 9, dt);
-    this.zoom = damp(this.zoom, this.desiredZoom, 8, dt);
-    this.yaw = damp(this.yaw, this.desiredYaw, 8, dt);
+    // Zoom settles faster than it pans; a sluggish wheel is the most common
+    // complaint about a damped RTS camera.
+    this.zoom = damp(this.zoom, this.desiredZoom, 12, dt);
+    this.yaw = damp(this.yaw, this.desiredYaw, 10, dt);
 
     if (this.shakeDuration > 0) {
       this.shakeTime += dt;
@@ -157,12 +198,12 @@ export class RtsCamera {
   }
 
   private apply(_dt: number): void {
-    const t = smoothstep(this.zoom);
-    const distance = lerp(this.nearDistance, this.farDistance, t);
-    const pitch = lerp(this.nearPitch, this.farPitch, t);
+    const t = this.zoom;
+    const distance = this.distanceAt(t);
+    const pitch = lerp(this.nearPitch, this.farPitch, smoothstep(t));
 
     const groundY = this.heightSampler?.(this.focus.x, this.focus.z) ?? 0;
-    const target = new THREE.Vector3(
+    this.target.set(
       this.focus.x + this.shakeOffset.x * 0.35,
       groundY + this.shakeOffset.y * 0.35,
       this.focus.z + this.shakeOffset.z * 0.35,
@@ -170,14 +211,20 @@ export class RtsCamera {
 
     const horizontal = Math.cos(pitch) * distance;
     const vertical = Math.sin(pitch) * distance;
-    this.camera.position.set(
-      target.x + Math.sin(this.yaw) * horizontal + this.shakeOffset.x,
-      target.y + vertical + this.shakeOffset.y,
-      target.z + Math.cos(this.yaw) * horizontal + this.shakeOffset.z,
-    );
-    this.camera.lookAt(target);
-    // Zoom-dependent FOV adds a subtle sense of scale at max zoom-out.
-    const fov = lerp(44, 50, t);
+    const px = this.target.x + Math.sin(this.yaw) * horizontal + this.shakeOffset.x;
+    const pz = this.target.z + Math.cos(this.yaw) * horizontal + this.shakeOffset.z;
+    let py = this.target.y + vertical + this.shakeOffset.y;
+
+    // Never let the eye sink into a cliff behind the focus point. Raising it
+    // steepens the shot slightly, which is the correct failure mode — the
+    // alternative is a frame of solid rock.
+    const under = this.heightSampler?.(px, pz);
+    if (under !== undefined && py < under + this.clearance) py = under + this.clearance;
+
+    this.camera.position.set(px, py, pz);
+    this.camera.lookAt(this.target);
+
+    const fov = lerp(this.nearFov, this.farFov, t);
     if (Math.abs(this.camera.fov - fov) > 0.01) {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
@@ -190,5 +237,10 @@ export class RtsCamera {
 
   get yawAngle(): number {
     return ((this.yaw % TAU) + TAU) % TAU;
+  }
+
+  /** Eye-to-focus distance in world units. Used by the shadow fit and by VFX LOD. */
+  get eyeDistance(): number {
+    return this.distanceAt(this.zoom);
   }
 }
