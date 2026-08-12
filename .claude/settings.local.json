@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "PowerShell($o=@\\(\\); foreach\\($c in 'node','npm','npx','git'\\){ $p=\\(Get-Command $c -ErrorAction SilentlyContinue\\); if\\($p\\){ $o += \"$c -> $\\($p.Source\\)\" } else { $o += \"$c -> NOT FOUND\" } }; $o; if\\(Get-Command node -ErrorAction SilentlyContinue\\){ \"node version: \" + \\(node -v\\) }; if\\(Get-Command npm -ErrorAction SilentlyContinue\\){ \"npm version: \" + \\(npm -v\\) })",
-      "PowerShell($ErrorActionPreference='SilentlyContinue'; $r = npm ping --registry=https://registry.npmjs.org 2>&1 | Out-String; if\\($LASTEXITCODE -eq 0\\){\"NPM REGISTRY: OK\"} else {\"NPM REGISTRY: FAIL\"}; $r.Trim\\(\\))"
+      "PowerShell($ErrorActionPreference='SilentlyContinue'; $r = npm ping --registry=https://registry.npmjs.org 2>&1 | Out-String; if\\($LASTEXITCODE -eq 0\\){\"NPM REGISTRY: OK\"} else {\"NPM REGISTRY: FAIL\"}; $r.Trim\\(\\))",
+      "PowerShell(cd D:\\\\Enfos; Select-String -Path src/art/materials.ts -Pattern \"stripe\" -Context 4,2 | Select-Object -First 60 | ForEach-Object { $_.Context.PreContext + \">>> \" + $_.Line + $_.Context.PostContext + \"`n---\" })",
+      "PowerShell(cd D:\\\\Enfos; npx tsc --noEmit 2>&1 | Select-Object -First 30; \"---\"; if\\($LASTEXITCODE -eq 0\\){\"TYPECHECK OK\"}else{\"exit $LASTEXITCODE\"})"
     ]
   }
 }

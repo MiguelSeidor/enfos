@@ -119,7 +119,8 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
       { stop: 1.0, color: 0xa89468 },
     ],
     layers: [
-      { kind: 'stripe', frequency: 12, amplitude: 1, angle: 0.6 },
+      // Integer shear [3,2] ~= the old 0.6 rad drift, and stays tileable.
+      { kind: 'dunes', frequency: 12, amplitude: 1, shear: [3, 2], octaves: 3 },
       { kind: 'fbm', frequency: 60, amplitude: 0.3, octaves: 3 },
     ],
     roughness: { min: 0.8, max: 0.96 },
@@ -138,7 +139,9 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     ],
     layers: [
       { kind: 'ridged', frequency: 3.5, amplitude: 1, octaves: 6, warp: 0.8 },
-      { kind: 'stripe', frequency: 9, amplitude: 0.35, angle: 1.5 },
+      // Near-horizontal banding on a cliff face is sedimentary bedding, which
+      // `terrace` models directly (hard riser, soft tread).
+      { kind: 'terrace', frequency: 9, amplitude: 0.35, steps: 7, octaves: 4 },
       { kind: 'cell', frequency: 16, amplitude: 0.4 },
     ],
     roughness: { min: 0.55, max: 0.9 },
@@ -156,7 +159,9 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
       { stop: 1.0, color: 0x574531 },
     ],
     layers: [
-      { kind: 'stripe', frequency: 22, amplitude: 1, angle: 0.02 },
+      // Fibres stretched along v: many features across u (`across`), few along
+      // v (`frequency`). Zero shear keeps the grain vertical, as before.
+      { kind: 'grain', frequency: 3, across: 24, amplitude: 1, octaves: 4, shear: [0, 0] },
       { kind: 'fbm', frequency: 14, amplitude: 0.5, octaves: 4, warp: 1.2 },
     ],
     roughness: { min: 0.75, max: 1.0 },
@@ -261,8 +266,9 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
       { stop: 1.0, color: 0x554a6b },
     ],
     layers: [
-      { kind: 'stripe', frequency: 90, amplitude: 1, angle: 0 },
-      { kind: 'stripe', frequency: 90, amplitude: 1, angle: Math.PI / 2 },
+      // The two perpendicular thread sets collapse into one `weave` layer,
+      // which also models the over/under crossing the old pair could not.
+      { kind: 'weave', frequency: 90, across: 90, amplitude: 1 },
       { kind: 'fbm', frequency: 12, amplitude: 0.3, octaves: 3 },
     ],
     roughness: { min: 0.7, max: 0.95 },
