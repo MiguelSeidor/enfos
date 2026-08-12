@@ -4,4 +4,5 @@ dist/
 *.log
 qa/shots/
 !qa/shots/.gitkeep
+.claude/*.lock
 .DS_Store
