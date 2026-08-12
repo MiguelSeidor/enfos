@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hero Survival — Vertical Slice</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%;
+        overflow: hidden; background: #05070c;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      #app { position: fixed; inset: 0; }
+      #viewport { display: block; width: 100%; height: 100%; }
+      #ui-root { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+      #ui-root > * { pointer-events: auto; }
+      #boot {
+        position: fixed; inset: 0; z-index: 100;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 18px; background: #05070c; color: #cfd8e3;
+        transition: opacity 500ms ease; letter-spacing: 0.14em; text-transform: uppercase;
+        font-size: 12px;
+      }
+      #boot.hidden { opacity: 0; pointer-events: none; }
+      #boot-bar { width: 280px; height: 2px; background: #1b2431; overflow: hidden; }
+      #boot-bar > i { display: block; height: 100%; width: 0%; background: #c8a253; transition: width 220ms ease; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="viewport"></canvas>
+    </div>
+    <div id="ui-root"></div>
+    <div id="boot">
+      <div id="boot-label">Inicializando</div>
+      <div id="boot-bar"><i></i></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
