@@ -1,0 +1,823 @@
+/**
+ * Landing page. Owner: UI.
+ *
+ * The site and the game share one visual language on purpose: the same gold,
+ * the same parchment text, the same display face the HUD uses. A player who
+ * clicks "Jugar" should not feel they arrived somewhere else.
+ *
+ * Locked to dark. The game is dark, every screenshot on the page is dark, and a
+ * light mode would mean shipping a second set of images that fight the first.
+ *
+ * No framework, no build step beyond Vite: the landing must load and paint long
+ * before the game bundle would have finished parsing, so it carries none of it.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Same values as the HUD's palette in src/ui/ui.css. Kept as literals rather
+     than imported, because the landing must not pull the game's stylesheet. */
+  --gold: #c8a253;
+  --gold-bright: #f5dda2;
+  --gold-text: #cfa956;
+  --ink: #0b0906;
+  --ink-2: #14120f;
+  --panel: #1a1712;
+  --edge: #3d3527;
+  --text: #e4dcc9;
+  --text-dim: #bdb094;
+
+  --display: 'Trajan Pro', 'Cinzel', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+  --body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  /* One radius scale for the whole page: soft on surfaces, pill on nothing. */
+  --radius: 4px;
+
+  /* Emil's strong curves. The built-in CSS easings are too weak to read as
+     deliberate at these durations. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+  --gutter: clamp(1rem, 4vw, 5rem);
+  --measure: 62ch;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: clamp(15px, 0.5vw + 14px, 17px);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/**
+ * A single fixed grain layer over the whole page.
+ *
+ * Flat dark panels band badly on cheap screens, and the game's own frames are
+ * noisy, so a little tooth keeps the two materials in the same world. It is
+ * fixed and pointer-transparent on purpose: grain inside a scrolling container
+ * repaints the whole surface every frame, which is a phone's frame budget gone
+ * on something nobody asked for.
+ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--display);
+  font-weight: 600;
+  /* Tracking is size specific: large type reads too loose at 0, so it tightens
+     as it grows, and the small caps labels open up instead. */
+  letter-spacing: -0.015em;
+  line-height: 1.08;
+  margin: 0;
+  color: var(--gold-bright);
+  text-wrap: balance;
+}
+
+h2 {
+  font-size: clamp(1.9rem, 3.4vw, 3rem);
+}
+
+h3 {
+  font-size: clamp(1.15rem, 1.4vw, 1.4rem);
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+
+p {
+  margin: 0;
+  max-width: var(--measure);
+  color: var(--text-dim);
+}
+
+a {
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 3px;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────────
+   Pressable things must answer the press on the way down, not on release. */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.7rem 1.5rem;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  font-family: var(--display);
+  font-size: 0.95rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    transform 160ms var(--ease-out),
+    border-color 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-lg {
+  min-height: 52px;
+  padding: 0.9rem 2.2rem;
+  font-size: 1rem;
+}
+
+.btn-primary {
+  color: #120d05;
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  border-color: var(--gold-bright);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 10px 30px rgba(200, 162, 83, 0.18);
+}
+
+.btn-ghost {
+  color: var(--text);
+  background: rgba(10, 8, 5, 0.5);
+  backdrop-filter: blur(6px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover {
+    background: linear-gradient(180deg, #fff0cf, var(--gold-bright));
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--gold);
+    color: var(--gold-bright);
+  }
+}
+
+/* ── Navigation ────────────────────────────────────────────────────────────
+   A translucent layer the page scrolls under, not an opaque strip that eats a
+   band of the viewport. */
+
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  height: 68px;
+  padding: 0 var(--gutter);
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+  background: linear-gradient(180deg, rgba(8, 6, 4, 0.82), rgba(8, 6, 4, 0));
+  backdrop-filter: blur(10px) saturate(130%);
+  mask-image: linear-gradient(180deg, #000 62%, transparent);
+}
+
+.nav-brand {
+  display: inline-flex;
+  align-items: center;
+  /* Every bar item clears the 44px a finger needs, even where the text itself
+     is much shorter than that. */
+  min-height: 44px;
+  gap: 0.6rem;
+  font-family: var(--display);
+  font-size: 1.05rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--gold-bright);
+}
+
+.nav-mark {
+  display: inline-flex;
+  color: var(--gold);
+}
+
+.nav-links {
+  display: flex;
+  gap: 1.8rem;
+  margin-left: auto;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+}
+
+.nav-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 180ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .nav-links a:hover {
+    color: var(--gold-bright);
+  }
+}
+
+.nav-cta {
+  padding: 0.5rem 1.2rem;
+  min-height: 44px;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 860px) {
+  .nav-links {
+    display: none;
+  }
+
+  .nav-cta {
+    margin-left: auto;
+  }
+}
+
+/* ── Hero ──────────────────────────────────────────────────────────────────
+   One real frame of the game, a scrim that keeps the type legible over it, and
+   nothing else competing. */
+
+.hero {
+  position: relative;
+  min-height: 100dvh;
+  display: grid;
+  align-items: end;
+  padding: 0 var(--gutter) clamp(3.5rem, 9vh, 7rem);
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+  overflow: hidden;
+}
+
+.hero-media {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+
+.hero-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* The frame is composed around the Core and the horde below it, so a narrow
+     crop keeps the middle of the image rather than its left edge. */
+  object-position: 52% 52%;
+  /* Settles on load: the frame arrives slightly pushed in and comes to rest.
+     It reads as the camera finding its mark, and it happens once. */
+  animation: hero-settle 1400ms var(--ease-out) both;
+}
+
+.hero-media img {
+  /* The game renders in bright daylight. Pulling saturation and lifting
+     contrast lets the frame sit under gold type without fighting it, and keeps
+     the page one temperature instead of two. */
+  filter: saturate(0.92) contrast(1.08) brightness(0.86);
+}
+
+.hero-media::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    /* The copy corner is dark whatever the screenshot happens to be, so the
+       headline never depends on the luck of a frame. */
+    linear-gradient(100deg, rgba(6, 5, 3, 0.88) 0%, rgba(6, 5, 3, 0.45) 38%, transparent 66%),
+    linear-gradient(180deg, rgba(6, 5, 3, 0.6) 0%, rgba(6, 5, 3, 0.05) 30%, rgba(6, 5, 3, 0.95) 92%),
+    radial-gradient(120% 80% at 70% 20%, transparent 40%, rgba(6, 5, 3, 0.7) 100%);
+}
+
+@keyframes hero-settle {
+  from {
+    transform: scale(1.06);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.hero-body {
+  max-width: 44rem;
+  animation: hero-rise 700ms var(--ease-out) 220ms both;
+}
+
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hero-title {
+  font-size: clamp(2.6rem, 7vw, 5.4rem);
+  letter-spacing: -0.025em;
+  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.8);
+}
+
+.hero-lede {
+  margin-top: 1.1rem;
+  font-size: clamp(1.02rem, 1.2vw, 1.22rem);
+  color: var(--text);
+  max-width: 34rem;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.9);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 2rem;
+}
+
+/* ── Premise: asymmetric split ─────────────────────────────────────────────── */
+
+.premise {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: clamp(2rem, 5vw, 5rem);
+  align-items: center;
+  padding: clamp(5rem, 12vh, 9rem) var(--gutter);
+}
+
+.premise h2 {
+  margin-bottom: 1.2rem;
+}
+
+.premise-list {
+  margin: 1.8rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.75rem;
+  max-width: var(--measure);
+}
+
+.premise-list li {
+  padding-left: 1.1rem;
+  position: relative;
+  color: var(--text-dim);
+}
+
+.premise-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  background: var(--gold);
+  transform: rotate(45deg);
+}
+
+.premise-list b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.premise-media {
+  margin: 0;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+  /* The inner gold hairline is the HUD's gilt frame, quoted. The shadow is
+     tinted toward the page rather than pure black, which is what keeps a dark
+     panel on a dark page from reading as a hole. */
+  box-shadow:
+    inset 0 0 0 1px rgba(200, 162, 83, 0.16),
+    0 30px 80px rgba(10, 7, 4, 0.7);
+}
+
+@media (max-width: 900px) {
+  .premise {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Pillars: a bento with exactly four cells ──────────────────────────────── */
+
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, auto);
+  gap: 1rem;
+  padding: 0 var(--gutter) clamp(4rem, 10vh, 8rem);
+}
+
+.pillar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1.6rem;
+  background: linear-gradient(180deg, var(--panel), var(--ink-2));
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.pillar h3 {
+  color: var(--gold-bright);
+}
+
+/* Two rows, each a wide frame beside a block of text, mirrored so the eye
+   crosses the page instead of running down one edge. Four items, four cells,
+   no filler. */
+.pillar-wide {
+  grid-column: span 2;
+  min-height: 24rem;
+  justify-content: flex-end;
+  padding: 0;
+}
+
+/* The text cells carry no image, so they earn their place with air and a rule
+   rather than by being small dark boxes next to big bright ones. */
+.pillar-note {
+  justify-content: center;
+  gap: 0.9rem;
+  padding: clamp(1.6rem, 2.4vw, 2.4rem);
+}
+
+.pillar-note::before {
+  content: '';
+  width: 2.5rem;
+  height: 1px;
+  background: linear-gradient(90deg, var(--gold), transparent);
+}
+
+.pillar-note h3 {
+  font-size: clamp(1.25rem, 1.7vw, 1.65rem);
+}
+
+.pillar-note p {
+  font-size: 1rem;
+}
+
+.pillar-wide .pillar-copy,
+.pillar-tall .pillar-copy {
+  position: relative;
+  z-index: 1;
+  padding: 1.6rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.pillar-wide img,
+.pillar-tall img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+.pillar-wide::after,
+.pillar-tall::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(180deg, rgba(8, 6, 4, 0.25) 20%, rgba(8, 6, 4, 0.92) 78%);
+}
+
+.pillar-tall {
+  grid-column: span 2;
+  min-height: 24rem;
+  justify-content: flex-end;
+  padding: 0;
+}
+
+@media (max-width: 1000px) {
+  .pillars {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pillar-wide,
+  .pillar-tall {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .pillars {
+    grid-template-columns: 1fr;
+  }
+
+  .pillar-wide,
+  .pillar-tall {
+    grid-column: span 1;
+    min-height: 18rem;
+  }
+}
+
+/* ── Roster: a rail that scrolls on a phone and lays flat on a desktop ─────── */
+
+.roster {
+  padding: 0 var(--gutter) clamp(4rem, 10vh, 8rem);
+}
+
+.roster-title {
+  margin-bottom: 2rem;
+  max-width: 22ch;
+}
+
+.roster-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.hero-card {
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, var(--panel), var(--ink-2));
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition:
+    transform 220ms var(--ease-out),
+    border-color 220ms ease;
+}
+
+/* No character photography here, deliberately. The models are still
+   procedural and at portrait distance they read as faceted cardboard, which
+   would make four cards in a row the weakest thing on the page. What the game
+   does have at full quality is its iconography, so each hero is introduced by
+   its crest colour and the four ability glyphs the HUD actually draws. */
+.hero-card-crest {
+  display: grid;
+  place-items: center;
+  height: 7.5rem;
+  color: var(--card-accent);
+  background:
+    radial-gradient(120% 90% at 50% 120%, color-mix(in srgb, var(--card-accent) 22%, transparent), transparent 70%),
+    linear-gradient(160deg, color-mix(in srgb, var(--card-primary) 88%, #000), var(--ink-2));
+  border-bottom: 1px solid var(--edge);
+}
+
+.hero-card-crest svg {
+  fill: currentColor;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.6));
+}
+
+.hero-card-kit {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.9rem 0 0;
+  padding: 0.9rem 0 0;
+  list-style: none;
+  border-top: 1px solid var(--edge);
+}
+
+.hero-card-kit li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.86rem;
+  color: var(--text-dim);
+}
+
+.hero-card-kit svg {
+  flex: none;
+  fill: var(--card-accent);
+  opacity: 0.9;
+}
+
+.hero-card-body {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1.1rem 1.2rem 1.4rem;
+}
+
+.hero-card-role {
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--card-accent, var(--gold-text));
+}
+
+.hero-card p:last-child {
+  font-size: 0.92rem;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .hero-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--gold-text);
+  }
+}
+
+@media (max-width: 900px) {
+  .roster-rail {
+    grid-auto-flow: column;
+    grid-auto-columns: 78%;
+    grid-template-columns: none;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    /* The rail bleeds into the gutter so the next card peeks, which is what
+       tells a thumb there is more to the right. */
+    margin: 0 calc(var(--gutter) * -1);
+    padding: 0 var(--gutter);
+    scrollbar-width: none;
+  }
+
+  .roster-rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hero-card {
+    scroll-snap-align: start;
+  }
+}
+
+/* ── Online ────────────────────────────────────────────────────────────────── */
+
+.online {
+  padding: 0 var(--gutter) clamp(4rem, 10vh, 8rem);
+  display: grid;
+  gap: clamp(2rem, 4vw, 3.5rem);
+}
+
+.online-media {
+  margin: 0;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(200, 162, 83, 0.16),
+    0 30px 80px rgba(10, 7, 4, 0.7);
+}
+
+.online-media img {
+  width: 100%;
+  aspect-ratio: 21 / 9;
+  object-fit: cover;
+}
+
+.online-body {
+  display: grid;
+  gap: 1rem;
+  max-width: 52rem;
+}
+
+.modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.mode {
+  display: grid;
+  gap: 0.2rem;
+  padding: 1rem 1.2rem;
+  border-top: 1px solid var(--edge);
+}
+
+.mode b {
+  font-family: var(--display);
+  font-size: 1.5rem;
+  letter-spacing: 0.06em;
+  color: var(--gold-bright);
+}
+
+.mode span {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+
+@media (max-width: 640px) {
+  .modes {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+/* ── Closing ───────────────────────────────────────────────────────────────── */
+
+.closing {
+  display: grid;
+  justify-items: center;
+  gap: 1rem;
+  text-align: center;
+  padding: clamp(5rem, 14vh, 10rem) var(--gutter);
+  border-top: 1px solid var(--edge);
+  background:
+    radial-gradient(80% 120% at 50% 0%, rgba(200, 162, 83, 0.1), transparent 60%),
+    var(--ink);
+}
+
+.closing p {
+  max-width: 40ch;
+}
+
+.closing .btn {
+  margin-top: 1rem;
+}
+
+/* ── Footer ────────────────────────────────────────────────────────────────── */
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 2rem;
+  align-items: baseline;
+  padding: 2rem var(--gutter) calc(2rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--edge);
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.foot span:first-child {
+  font-family: var(--display);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold-text);
+}
+
+.foot-note {
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .foot-note {
+    margin-left: 0;
+  }
+}
+
+/* ── Scroll reveal ─────────────────────────────────────────────────────────
+   Gated on a class the script adds, so with JavaScript off or under reduced
+   motion everything is simply visible. */
+
+.js .reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition:
+    opacity 620ms var(--ease-out),
+    transform 620ms var(--ease-out);
+}
+
+.js .reveal.is-in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .js .reveal,
+  .js .reveal.is-in {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .hero-media img,
+  .hero-body {
+    animation: none;
+  }
+}

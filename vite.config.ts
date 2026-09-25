@@ -11,10 +11,27 @@ export default defineConfig({
     port: 5173,
     host: '127.0.0.1',
     strictPort: true,
+    // The client always connects to its own origin at /ws. In development that
+    // is Vite, which forwards it to the match server (`npm run server`); in
+    // production the match server serves the client itself, so the same URL
+    // works with no configuration.
+    proxy: {
+      '/ws': { target: 'ws://127.0.0.1:8787', ws: true },
+    },
   },
   build: {
     target: 'es2022',
     sourcemap: true,
     chunkSizeWarningLimit: 2048,
+    // Two pages, two bundles. The landing at `/` carries no three.js: it has to
+    // paint on a phone over mobile data long before the game would have
+    // finished downloading, and the game at `/play/` is what the player asks
+    // for when they press Jugar.
+    rollupOptions: {
+      input: {
+        landing: fileURLToPath(new URL('./index.html', import.meta.url)),
+        game: fileURLToPath(new URL('./play/index.html', import.meta.url)),
+      },
+    },
   },
 });

@@ -2,40 +2,331 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Hero Survival — Vertical Slice</title>
-    <style>
-      :root { color-scheme: dark; }
-      html, body {
-        margin: 0; padding: 0; width: 100%; height: 100%;
-        overflow: hidden; background: #05070c;
-        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-      }
-      #app { position: fixed; inset: 0; }
-      #viewport { display: block; width: 100%; height: 100%; }
-      #ui-root { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
-      #ui-root > * { pointer-events: auto; }
-      #boot {
-        position: fixed; inset: 0; z-index: 100;
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 18px; background: #05070c; color: #cfd8e3;
-        transition: opacity 500ms ease; letter-spacing: 0.14em; text-transform: uppercase;
-        font-size: 12px;
-      }
-      #boot.hidden { opacity: 0; pointer-events: none; }
-      #boot-bar { width: 280px; height: 2px; background: #1b2431; overflow: hidden; }
-      #boot-bar > i { display: block; height: 100%; width: 0%; background: #c8a253; transition: width 220ms ease; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Núcleo Eterno · Defiende el Núcleo, sabotea al rival</title>
+    <meta
+      name="description"
+      content="Hero survival en tiempo real: sesenta oleadas contra tu Núcleo mientras saboteas el del rival. Solo, 1v1, 2v2 o 3v3, en el navegador."
+    />
+    <meta name="theme-color" content="#0b0906" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Núcleo Eterno" />
+    <meta
+      property="og:description"
+      content="Sesenta oleadas. Un solo Núcleo. Defiéndelo mientras saboteas al rival."
+    />
+    <meta property="og:image" content="/landing/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- Preloaded with the same candidate list the <img> uses, or the browser
+         would fetch the 4K frame on a phone and then fetch the small one too. -->
+    <link
+      rel="preload"
+      as="image"
+      href="/landing/hero.jpg"
+      imagesrcset="/landing/hero-800.jpg 800w, /landing/hero-1280.jpg 1280w, /landing/hero-1920.jpg 1920w, /landing/hero.jpg 3840w"
+      imagesizes="100vw"
+      fetchpriority="high"
+    />
+    <link rel="stylesheet" href="/src/landing/landing.css" />
   </head>
   <body>
-    <div id="app">
-      <canvas id="viewport"></canvas>
-    </div>
-    <div id="ui-root"></div>
-    <div id="boot">
-      <div id="boot-label">Inicializando</div>
-      <div id="boot-bar"><i></i></div>
-    </div>
-    <script type="module" src="/src/main.ts"></script>
+    <header class="nav">
+      <a class="nav-brand" href="/" aria-label="Núcleo Eterno, inicio">
+        <span class="nav-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.4">
+            <path d="M12 2.6 4.8 6.4v7.2c0 4.3 3 7.6 7.2 8.8 4.2-1.2 7.2-4.5 7.2-8.8V6.4L12 2.6Z" />
+            <path d="M12 7.6 9 12l3 4.4 3-4.4-3-4.4Z" />
+          </svg>
+        </span>
+        Núcleo Eterno
+      </a>
+      <nav class="nav-links" aria-label="Secciones">
+        <a href="#como-se-juega">Cómo se juega</a>
+        <a href="#heroes">Héroes</a>
+        <a href="#online">En línea</a>
+      </nav>
+      <a class="btn btn-primary nav-cta" href="/play/">Jugar</a>
+    </header>
+
+    <main>
+      <!-- Hero: one frame of the real game, the claim, and the way in. -->
+      <section class="hero">
+        <div class="hero-media">
+          <img
+            src="/landing/hero.jpg"
+            srcset="/landing/hero-800.jpg 800w, /landing/hero-1280.jpg 1280w, /landing/hero-1920.jpg 1920w, /landing/hero.jpg 3840w"
+            sizes="100vw"
+            alt="El Núcleo azul sobre su plinto mientras una oleada de monstruos avanza por el carril"
+            width="1920"
+            height="1080"
+            fetchpriority="high"
+            decoding="async"
+          />
+        </div>
+        <div class="hero-body">
+          <h1 class="hero-title">
+            Sesenta oleadas.<br />
+            Un solo Núcleo.
+          </h1>
+          <p class="hero-lede">
+            Defiende tu Núcleo del asedio mientras saboteas al rival. Solo o en equipos de hasta tres.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary btn-lg" href="/play/">Jugar</a>
+            <a class="btn btn-ghost btn-lg" href="#como-se-juega">Cómo se juega</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- The premise, as a split: the claim on one side, the fight on the other. -->
+      <section class="premise" id="como-se-juega">
+        <div class="premise-text reveal">
+          <h2>Dos bases. Un carril. La oleada no espera.</h2>
+          <p>
+            Cada equipo defiende su propio Núcleo de la misma oleada, al mismo tiempo. Si la aguantas y el
+            rival no, ganas. Los monstruos entran cada treinta segundos estén como estén los anteriores, así
+            que lo que no mates se acumula.
+          </p>
+          <ul class="premise-list">
+            <li><b>12 vidas</b> por Núcleo. Cada monstruo que llega se lleva una.</li>
+            <li><b>60 oleadas</b> con jefes cada diez.</li>
+            <li><b>Muerte súbita</b> si las dos bases siguen en pie al final.</li>
+          </ul>
+        </div>
+        <figure class="premise-media reveal">
+          <img
+            src="/landing/battle.jpg"
+            srcset="/landing/battle-800.jpg 800w, /landing/battle-1280.jpg 1280w, /landing/battle-1920.jpg 1920w, /landing/battle.jpg 3840w"
+            sizes="(max-width: 900px) 100vw, 55vw"
+            alt="Docenas de monstruos peleando contra el héroe en el carril"
+            width="1920"
+            height="1080"
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
+      </section>
+
+      <!-- Four pillars, as a bento with real frames inside two of the cells. -->
+      <section class="pillars">
+        <article class="pillar pillar-wide reveal">
+          <div class="pillar-copy">
+            <h3>Saboteas mientras defiendes</h3>
+            <p>
+              El valor que ganas matando se gasta en la oleada del rival: refuerzos, frenesí, una élite con el
+              triple de vida. Mientras tú aguantas, decides lo que le cae encima.
+            </p>
+          </div>
+          <img
+            src="/landing/ultimate.jpg"
+            srcset="/landing/ultimate-800.jpg 800w, /landing/ultimate-1280.jpg 1280w, /landing/ultimate-1920.jpg 1920w, /landing/ultimate.jpg 3840w"
+            sizes="(max-width: 640px) 100vw, (max-width: 1000px) 100vw, 66vw"
+            alt="Un meteoro impactando sobre un grupo de monstruos"
+            width="1920"
+            height="1080"
+            loading="lazy"
+            decoding="async"
+          />
+        </article>
+
+        <article class="pillar pillar-note reveal">
+          <h3>Progresión sin techo</h3>
+          <p>
+            Niveles, atributos, objetos y libros. El héroe de la oleada 50 no se parece al de la primera.
+          </p>
+        </article>
+
+        <article class="pillar pillar-note reveal">
+          <h3>Suena a fragua</h3>
+          <p>
+            Música medieval generada en directo que sube con la oleada, y cada golpe, grito y campana
+            sintetizados en el navegador.
+          </p>
+        </article>
+
+        <article class="pillar pillar-tall reveal">
+          <div class="pillar-copy">
+            <h3>Una interfaz que cabe en la cabeza</h3>
+            <p>Núcleo, oleada, héroe y órdenes. Nada que buscar en un menú mientras te comen.</p>
+          </div>
+          <img
+            src="/landing/hud.jpg"
+            srcset="/landing/hud-800.jpg 800w, /landing/hud-1280.jpg 1280w, /landing/hud-1920.jpg 1920w, /landing/hud.jpg 3840w"
+            sizes="(max-width: 1000px) 100vw, 66vw"
+            alt="La partida con la interfaz visible: integridad del Núcleo, oleada, vitales y órdenes"
+            width="1920"
+            height="1080"
+            loading="lazy"
+            decoding="async"
+          />
+        </article>
+      </section>
+
+      <!-- The roster: four characters, four jobs. -->
+      <section class="roster" id="heroes">
+        <h2 class="roster-title">Cuatro héroes, cuatro maneras de aguantar</h2>
+        <div class="roster-rail">
+          <article class="hero-card reveal" style="--card-primary: #2a3550; --card-accent: #c8a253">
+            <div class="hero-card-crest" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="34" height="34"><path d="M12 2 3 6v7c0 5 3.8 8.7 9 9.9 5.2-1.2 9-4.9 9-9.9V6l-9-4Zm0 2.4 6.8 3v5.6c0 3.7-2.7 6.6-6.8 7.7-4.1-1.1-6.8-4-6.8-7.7V7.4L12 4.4Z" /></svg>
+            </div>
+            <div class="hero-card-body">
+              <h3>Bulwark</h3>
+              <p class="hero-card-role">Tanque y control</p>
+              <p>Aguanta la línea y obliga a la oleada a pelear con él, lejos del Núcleo.</p>
+              <ul class="hero-card-kit">
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2 4 5v6.5c0 4.9 3.4 9 8 10.5 4.6-1.5 8-5.6 8-10.5V5l-8-3Zm0 3.4 5 1.9v4.2c0 3.3-2.1 6.3-5 7.6-2.9-1.3-5-4.3-5-7.6V7.3l5-1.9Zm.9 2.6-3.3 4.4h2.2l-1 3.6 3.4-4.6h-2.3l1-3.4Z" /></svg>
+                <span>Embate de escudo</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2a5 5 0 0 0-5 5v3a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5Zm0 2.2A2.8 2.8 0 0 1 14.8 7v3a2.8 2.8 0 0 1-5.6 0V7A2.8 2.8 0 0 1 12 4.2ZM4 11.5h2a6 6 0 0 0 12 0h2a8 8 0 0 1-7 7.9V22h-2v-2.6a8 8 0 0 1-7-7.9Z" /></svg>
+                <span>Grito de anclaje</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M2 5h9v5H2V5Zm11 0h9v5h-9V5ZM2 12h5v5H2v-5Zm7 0h6v5H9v-5Zm8 0h5v5h-5v-5ZM2 19h9v2H2v-2Zm11 0h9v2h-9v-2Z" /></svg>
+                <span>Muro de contención</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 1.6 13.4 5l3.5-1.3-1.3 3.5L19 8.6l-3.4 1.4 1.3 3.5-3.5-1.3L12 15.6 10.6 12.2l-3.5 1.3 1.3-3.5L5 8.6l3.4-1.4L7.1 3.7 10.6 5 12 1.6Zm0 4.9a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 0 0 0-4.2ZM5 16h14v2.2c0 2-1.6 3.8-3.6 3.8H8.6C6.6 22 5 20.2 5 18.2V16Z" /></svg>
+                <span>Bastión inquebrantable</span>
+              </li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="hero-card reveal" style="--card-primary: #3b2a52; --card-accent: #b98ce0">
+            <div class="hero-card-crest" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="34" height="34"><path d="M12 2 3 6v7c0 5 3.8 8.7 9 9.9 5.2-1.2 9-4.9 9-9.9V6l-9-4Zm0 2.4 6.8 3v5.6c0 3.7-2.7 6.6-6.8 7.7-4.1-1.1-6.8-4-6.8-7.7V7.4L12 4.4Z" /></svg>
+            </div>
+            <div class="hero-card-body">
+              <h3>Oracle</h3>
+              <p class="hero-card-role">Daño de área</p>
+              <p>Encadena relámpagos, congela zonas enteras y remata con un meteoro.</p>
+              <ul class="hero-card-kit">
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M13 2 4 13h6l-1 9 9-11h-6l1-9Z" /></svg>
+                <span>Cadena de relámpagos</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M11 2h2v5.3l2.2-2.2 1.4 1.4L13 10.1v3.8l3.6-3.5-1.9-.5.5-1.9 4.3 1.2-1.2 4.3-1.9-.5.5-1.9L13 14.6V22h-2v-7.4l-3.9 3.8.5 1.9-1.9.5L4.5 16.5l4.3-1.2.5 1.9-1.9.5L11 13.9v-3.8L7.4 6.5l1.4-1.4L11 7.3V2Z" /></svg>
+                <span>Tormenta de escarcha</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2c.8 4.4 1.8 7.2 4.4 8-2.6.8-3.6 3.6-4.4 8-.8-4.4-1.8-7.2-4.4-8 2.6-.8 3.6-3.6 4.4-8Zm7 10c.4 2 .9 3.3 2 3.7-1.1.4-1.6 1.7-2 3.7-.4-2-.9-3.3-2-3.7 1.1-.4 1.6-1.7 2-3.7Z" /></svg>
+                <span>Sello de éter</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2c1.6 3.2.7 5-.6 6.6-1.4 1.7-3 3.2-3 5.9A5.6 5.6 0 0 0 14 22a5.9 5.9 0 0 0 4-5.6c0-3.4-2.2-5-3.3-7.7-.4 1-.9 1.6-1.6 2.1.4-3-.5-6.2-1.1-8.8Z" /></svg>
+                <span>Meteoro del umbral</span>
+              </li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="hero-card reveal" style="--card-primary: #24402c; --card-accent: #c9b06a">
+            <div class="hero-card-crest" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="34" height="34"><path d="M12 2 3 6v7c0 5 3.8 8.7 9 9.9 5.2-1.2 9-4.9 9-9.9V6l-9-4Zm0 2.4 6.8 3v5.6c0 3.7-2.7 6.6-6.8 7.7-4.1-1.1-6.8-4-6.8-7.7V7.4L12 4.4Z" /></svg>
+            </div>
+            <div class="hero-card-body">
+              <h3>Talon</h3>
+              <p class="hero-card-role">Daño sostenido</p>
+              <p>Atraviesa filas de una flecha, deja trampas y se aparta de un paso.</p>
+              <ul class="hero-card-kit">
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M21 3 10.5 13.5 8 11l-5 8 8-5-2.5-2.5L21 3Zm-6.8 3.5L21 3l-.6 4.8-3.2-1.5-3 3.2Z" /></svg>
+                <span>Flecha perforante</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 3h2.5L12 9.5 18.5 3H21v2.5L14.5 12 21 18.5V21h-2.5L12 14.5 5.5 21H3v-2.5L9.5 12 3 5.5V3Zm9 5.1L8.6 4.7 12 8.1l3.4-3.4L12 8.1Zm0 7.8 3.4 3.4L12 15.9l-3.4 3.4L12 15.9ZM4.2 4.2a1.2 1.2 0 1 0 0 .01ZM19.8 4.2a1.2 1.2 0 1 0 0 .01ZM4.2 19.8a1.2 1.2 0 1 0 0 .01ZM19.8 19.8a1.2 1.2 0 1 0 0 .01Z" /></svg>
+                <span>Trampa de red</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 2h3l.6 6.4 5.1 3.1c1.2.7 1.9 2 1.9 3.4V19H8.5c-1.9 0-3.5-1.6-3.5-3.5V12h3l-2-4h3L9 2Zm-7 5h4v2H2V7Zm-1 4h4v2H1v-2Zm1 4h4v2H2v-2Z" /></svg>
+                <span>Paso del viento</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 2h2v12.2l2.3-2.3 1.4 1.4L6 18 1.3 13.3l1.4-1.4L5 14.2V2Zm6 4h2v8.2l2.3-2.3 1.4 1.4L12 18l-4.7-4.7 1.4-1.4L11 14.2V6Zm6-4h2v12.2l2.3-2.3 1.4 1.4L18 18l-4.7-4.7 1.4-1.4L17 14.2V2Z" /></svg>
+                <span>Lluvia de flechas</span>
+              </li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="hero-card reveal" style="--card-primary: #3a3320; --card-accent: #e6c469">
+            <div class="hero-card-crest" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="34" height="34"><path d="M12 2 3 6v7c0 5 3.8 8.7 9 9.9 5.2-1.2 9-4.9 9-9.9V6l-9-4Zm0 2.4 6.8 3v5.6c0 3.7-2.7 6.6-6.8 7.7-4.1-1.1-6.8-4-6.8-7.7V7.4L12 4.4Z" /></svg>
+            </div>
+            <div class="hero-card-body">
+              <h3>Vesper</h3>
+              <p class="hero-card-role">Apoyo y daño sagrado</p>
+              <p>Cura peleando: la luz que arranca del enemigo va al aliado más herido.</p>
+              <ul class="hero-card-kit">
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2c.8 4.4 1.8 7.2 4.4 8-2.6.8-3.6 3.6-4.4 8-.8-4.4-1.8-7.2-4.4-8 2.6-.8 3.6-3.6 4.4-8Zm7 10c.4 2 .9 3.3 2 3.7-1.1.4-1.6 1.7-2 3.7-.4-2-.9-3.3-2-3.7 1.1-.4 1.6-1.7 2-3.7Z" /></svg>
+                <span>Luz punzante</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M10 2h4v6h6v4h-6v10h-4V12H4V8h6V2Z" /></svg>
+                <span>Círculo de auxilio</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2 3 6v7c0 5 3.8 8.7 9 9.9 5.2-1.2 9-4.9 9-9.9V6l-9-4Zm0 2.4 6.8 3v5.6c0 3.7-2.7 6.6-6.8 7.7-4.1-1.1-6.8-4-6.8-7.7V7.4L12 4.4Z" /></svg>
+                <span>Égida del alba</span>
+              </li>
+              <li>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 1.6 13.4 5l3.5-1.3-1.3 3.5L19 8.6l-3.4 1.4 1.3 3.5-3.5-1.3L12 15.6 10.6 12.2l-3.5 1.3 1.3-3.5L5 8.6l3.4-1.4L7.1 3.7 10.6 5 12 1.6Zm0 4.9a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 0 0 0-4.2ZM5 16h14v2.2c0 2-1.6 3.8-3.6 3.8H8.6C6.6 22 5 20.2 5 18.2V16Z" /></svg>
+                <span>Alba</span>
+              </li>
+              </ul>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- Online, as a wide frame with the modes underneath it. -->
+      <section class="online" id="online">
+        <figure class="online-media reveal">
+          <img
+            src="/landing/map.jpg"
+            srcset="/landing/map-800.jpg 800w, /landing/map-1280.jpg 1280w, /landing/map-1920.jpg 1920w, /landing/map.jpg 3840w"
+            sizes="100vw"
+            alt="Vista amplia del mapa con las dos bases enfrentadas y el carril entre ellas"
+            width="1920"
+            height="1080"
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
+        <div class="online-body">
+          <h2 class="reveal">En línea, sin instalar nada</h2>
+          <p class="reveal">
+            Crea una sala, comparte cuatro letras y juega. Si se te va la conexión, la partida se detiene y te
+            espera; cuando vuelves, sigue donde estaba.
+          </p>
+          <div class="modes">
+            <div class="mode reveal"><b>1v1</b><span>Tú contra el rival</span></div>
+            <div class="mode reveal"><b>2v2</b><span>Dos Núcleos, dos frentes</span></div>
+            <div class="mode reveal"><b>3v3</b><span>La oleada crece con vosotros</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing">
+        <h2 class="reveal">Se juega en el navegador</h2>
+        <p class="reveal">Ratón y teclado, o el dedo en tableta y móvil. Sin descargas y sin cuenta.</p>
+        <a class="btn btn-primary btn-lg reveal" href="/play/">Jugar</a>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>Núcleo Eterno</span>
+      <span class="foot-note">Obra original. Personajes, mapa, música y reglas propios.</span>
+    </footer>
+
+    <script type="module" src="/src/landing/landing.ts"></script>
   </body>
 </html>
