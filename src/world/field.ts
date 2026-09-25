@@ -17,7 +17,7 @@ import {
   CELL,
   CELLS,
   LEVEL_STEP,
-  LANE_NODES,
+  LANE_ROUTES,
   LANDMARKS,
   MAP_HALF,
   MAP_SIZE,
@@ -26,11 +26,14 @@ import {
   PLAY_RADIUS,
   WATER_LEVEL,
   createElevationField,
+  inBaseTerrace,
   segmentQuery,
   type Elevation,
   type ElevationField,
 } from './layout';
 import { clamp, clamp01, lerp, smoothstep } from '@/core/mathx';
+import type { MapOverlay } from './overlay';
+import { atan, cos, hypot, sin } from '@/core/detmath';
 
 /** Sample resolution of the cached height/AO lookup grid. */
 const SAMPLE_RES = CELLS * 4 + 1; // 241 → 1 world unit
@@ -49,6 +52,7 @@ export class TerrainFieldData {
   /** Four corner levels per cell, order: (0,0) (1,0) (1,1) (0,1). */
   readonly corners = new Float32Array(CELLS * CELLS * 4);
   readonly ramp = new Uint8Array(CELLS * CELLS);
+  readonly carveMask = new Float32Array(CELLS * CELLS);
   readonly laneMask = new Float32Array(CELLS * CELLS);
   readonly gorgeMask = new Float32Array(CELLS * CELLS);
   readonly walkable = new Uint8Array(CELLS * CELLS);
@@ -73,7 +77,7 @@ export class TerrainFieldData {
   // ── Construction ───────────────────────────────────────────────────────────
 
   private buildLevels(): void {
-    const out: Elevation = { e: 0, ramp: false, lane: 0, gorge: 0 };
+    const out: Elevation = { e: 0, ramp: false, lane: 0, gorge: 0, carve: 0 };
     const raw = new Float32Array(CELLS * CELLS);
 
     for (let j = 0; j < CELLS; j++) {
@@ -83,22 +87,67 @@ export class TerrainFieldData {
         this.elevation.sample(Math.abs(x), z, out);
         const c = j * CELLS + i;
         raw[c] = out.e;
-        this.level[c] = clamp(Math.round(out.e), MIN_LEVEL, MAX_LEVEL);
         this.ramp[c] = out.ramp ? 1 : 0;
+        this.carveMask[c] = out.carve;
         this.laneMask[c] = out.lane;
         this.gorgeMask[c] = out.gorge;
       }
     }
 
-    // Two majority passes remove single-cell speckle left by the regional
-    // noise crossing a rounding boundary. Without this the terrace outlines
-    // look like dithering rather than authored shapes.
+    // Low-pass the potential before quantising. The regional noise rides right
+    // on the rounding boundaries, and quantising it raw dithers every terrace
+    // outline into cell-sized speckle — the v1 map fragmented into dozens of
+    // knee-high islands. Two weighted 3×3 passes kill the dither while moving
+    // an intended boundary by less than a cell. Carved corridors are exempt as
+    // *targets*: the lane is authored last and must win over smoothing, or a
+    // ridge neighbour bleeds in and pinches the route shut.
+    const blurred = new Float32Array(CELLS * CELLS);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let j = 0; j < CELLS; j++) {
+        for (let i = 0; i < CELLS; i++) {
+          const c = j * CELLS + i;
+          // The base terrace is exempt for the same reason carved corridors
+          // are: it is authored as a hard-edged shelf, and smoothing its
+          // boundary drags the neighbouring highland inward. Two passes reach
+          // two cells, so a 3-terrace drop at the rim produced intermediate
+          // levels a couple of cells *inside* the plaza — which quantise into a
+          // maze of knee-high walls between the fountain and the Core, exactly
+          // where the player walks.
+          const bx = -MAP_HALF + (i + 0.5) * CELL;
+          const bz = -MAP_HALF + (j + 0.5) * CELL;
+          if (this.carveMask[c] > 0.35 || this.ramp[c] || inBaseTerrace(bx, bz)) {
+            blurred[c] = raw[c];
+            continue;
+          }
+          let sum = 0;
+          let wsum = 0;
+          for (let dj = -1; dj <= 1; dj++) {
+            for (let di = -1; di <= 1; di++) {
+              const ni = i + di;
+              const nj = j + dj;
+              if (ni < 0 || nj < 0 || ni >= CELLS || nj >= CELLS) continue;
+              const w = di === 0 && dj === 0 ? 2 : di === 0 || dj === 0 ? 1 : 0.5;
+              sum += raw[nj * CELLS + ni]! * w;
+              wsum += w;
+            }
+          }
+          blurred[c] = sum / wsum;
+        }
+      }
+      raw.set(blurred);
+    }
+
+    for (let c = 0; c < CELLS * CELLS; c++) {
+      this.level[c] = clamp(Math.round(raw[c]!), MIN_LEVEL, MAX_LEVEL);
+    }
+
+    // Majority passes remove any single-cell speckle the blur left behind.
     for (let pass = 0; pass < 2; pass++) {
       const src = Int8Array.from(this.level);
       for (let j = 1; j < CELLS - 1; j++) {
         for (let i = 1; i < CELLS - 1; i++) {
           const c = j * CELLS + i;
-          if (this.ramp[c]) continue;
+          if (this.ramp[c] || this.carveMask[c] > 0.35) continue;
           const me = src[c];
           const n = [src[c - 1], src[c + 1], src[c - CELLS], src[c + CELLS]];
           let same = 0;
@@ -120,6 +169,8 @@ export class TerrainFieldData {
       }
     }
 
+    this.mergeSmallRegions();
+
     // Symmetry guard: force the +X half to mirror the -X half exactly. The
     // authored field is already mirrored, but rounding on the cell centre can
     // differ by one ULP; this makes the property exact by construction.
@@ -129,12 +180,31 @@ export class TerrainFieldData {
         const b = j * CELLS + (CELLS - 1 - i);
         this.level[b] = this.level[a];
         this.ramp[b] = this.ramp[a];
+        this.carveMask[b] = this.carveMask[a];
         this.laneMask[b] = this.laneMask[a];
         this.gorgeMask[b] = this.gorgeMask[a];
         raw[b] = raw[a];
       }
     }
 
+    // Snapshot the generated result before any authored edit touches it. The
+    // overlay stores *deltas*, so it needs a stable base to add to — and a
+    // rebuild has to start from the generator's answer, not from the last
+    // edited state, or repeated edits would compound.
+    this.baseLevel = Int8Array.from(this.level);
+    this.baseRamp = Uint8Array.from(this.ramp);
+    this.deriveFromLevels();
+  }
+
+  /**
+   * Everything downstream of `level`.
+   *
+   * Split out of `buildLevels` so the editor can re-run it after changing a few
+   * cells. The expensive half is the elevation sampling and the blur above;
+   * this half is a handful of linear passes over the grid and is fast enough to
+   * run on every brush stroke.
+   */
+  private deriveFromLevels(): void {
     for (let j = 0; j < CELLS; j++) {
       for (let i = 0; i < CELLS; i++) {
         const c = j * CELLS + i;
@@ -150,17 +220,154 @@ export class TerrainFieldData {
         const z = -MAP_HALF + (j + 0.5) * CELL;
         const inPlay = Math.abs(x) < PLAY_RADIUS && Math.abs(z) < PLAY_RADIUS;
         const lvl = this.level[c];
-        this.walkable[c] = inPlay && lvl >= 0 && lvl <= 4 ? 1 : 0;
+
+        // Walkable is the *authored* route plus the base terrace — not simply
+        // "anything below the highland".
+        //
+        // The level test alone marked 78 % of the map walkable, because the
+        // central gorge leaves a continuous low bank running the full length of
+        // the map beside the lane. A hero ordered across the map pathed along
+        // that bank and skipped the corridor entirely; the lane read as
+        // decoration. The route is the design (GDD §5) and this is what makes
+        // it so for the player as well as for the creeps.
+        //
+        // 0.55 on the carve. The lane mask feathers from 1 to 0 across
+        // `LANE_FEATHER`, and at a low threshold the walkable corridor spread
+        // to roughly u±20 — wide enough to touch the base terrace's inner edge
+        // at u=26. That contact is what let a hero step off the plaza straight
+        // onto the avenue and skip the lane's entire northern loop. Cutting
+        // just past the half-way point keeps a corridor comfortably wider than
+        // a creep pack while leaving highland between the shelf and the lane.
+        const onRoute = this.carveMask[c] > 0.55;
+        const onBase = inBaseTerrace(x, z);
+        this.walkable[c] = inPlay && lvl >= 0 && lvl <= 4 && (onRoute || onBase) ? 1 : 0;
       }
     }
-
-    this.rawLevels = raw;
   }
 
+  /**
+   * Applies an authored overlay and rebuilds everything derived from it.
+   *
+   * Starts from `baseLevel` every time rather than from the current state, so
+   * removing an edit genuinely removes it. Costs the derived passes plus the
+   * corner, height and AO rebuilds — the elevation sampling and the blur, which
+   * are the expensive parts, are not repeated.
+   */
+  applyOverlay(overlay: MapOverlay): void {
+    this.level.set(this.baseLevel);
+    this.ramp.set(this.baseRamp);
+    for (const [key, delta] of Object.entries(overlay.terrain)) {
+      const comma = key.indexOf(',');
+      const ix = Number(key.slice(0, comma));
+      const iz = Number(key.slice(comma + 1));
+      if (!Number.isFinite(ix) || !Number.isFinite(iz)) continue;
+      if (ix < 0 || iz < 0 || ix >= CELLS || iz >= CELLS) continue;
+      const c = iz * CELLS + ix;
+      this.level[c] = clamp(this.level[c] + delta, MIN_LEVEL, MAX_LEVEL);
+      // Clearing the ramp flag is what makes the edit visible at all.
+      // `buildCorners` treats a ramp cell as continuous and re-samples the
+      // elevation field for its four corners, discarding `level` entirely — so
+      // raising a cell on the lane or on an approach ramp changed the array and
+      // nothing on screen. An authored cell is authored: it is flat at the
+      // level it was given, and the generator no longer has a say.
+      this.ramp[c] = 0;
+    }
+    this.deriveFromLevels();
+    this.buildCorners();
+    this.buildHeightGrid();
+    this.buildAo();
+  }
+
+  /** Cell index for a world position, or null when outside the grid. */
+  cellAt(x: number, z: number): { ix: number; iz: number } | null {
+    const ix = Math.floor((x + MAP_HALF) / CELL);
+    const iz = Math.floor((z + MAP_HALF) / CELL);
+    if (ix < 0 || iz < 0 || ix >= CELLS || iz >= CELLS) return null;
+    return { ix, iz };
+  }
+
+  /** Generated levels and ramp flags, before any authored edit. */
+  private baseLevel = new Int8Array(0);
+  private baseRamp = new Uint8Array(0);
   private rawLevels = new Float32Array(0);
 
+  /**
+   * Flood-fills connected components of equal level and absorbs any region too
+   * small to stand on into the neighbouring level it shares the longest border
+   * with. This is the difference between "noise that happens to be quantised"
+   * and plateaus that read (and play) as authored terrain: after this pass
+   * every terrace inside the play space is at least a handful of cells wide.
+   * The rim mountains (level > 5) and the outer scenery ring are exempt — up
+   * there the fragmentation *is* the craggy skyline.
+   */
+  private mergeSmallRegions(): void {
+    const MIN_CELLS = 8; // 8 cells × 16 m² — smallest plateau worth keeping
+    const MARGIN = PLAY_RADIUS + 12;
+    const total = CELLS * CELLS;
+    const stack = new Int32Array(total);
+    const region = new Int32Array(total);
+
+    for (let iter = 0; iter < 4; iter++) {
+      let changed = false;
+      const visited = new Uint8Array(total);
+
+      for (let start = 0; start < total; start++) {
+        if (visited[start] || this.ramp[start] || this.carveMask[start]! > 0.35) continue;
+        const lvl = this.level[start]!;
+
+        let head = 0;
+        let size = 0;
+        stack[head++] = start;
+        visited[start] = 1;
+        let eligible = lvl <= 5;
+        const borders = new Map<number, number>();
+
+        while (head > 0) {
+          const c = stack[--head]!;
+          region[size++] = c;
+          const i = c % CELLS;
+          const j = (c / CELLS) | 0;
+          const x = -MAP_HALF + (i + 0.5) * CELL;
+          const z = -MAP_HALF + (j + 0.5) * CELL;
+          if (Math.abs(x) > MARGIN || Math.abs(z) > MARGIN) eligible = false;
+          const left = i > 0 ? c - 1 : -1;
+          const right = i < CELLS - 1 ? c + 1 : -1;
+          const down = j > 0 ? c - CELLS : -1;
+          const up = j < CELLS - 1 ? c + CELLS : -1;
+          for (const n of [left, right, down, up]) {
+            if (n < 0) continue;
+            if (this.ramp[n] || this.carveMask[n]! > 0.35) continue;
+            const nl = this.level[n]!;
+            if (nl === lvl) {
+              if (!visited[n]) {
+                visited[n] = 1;
+                stack[head++] = n;
+              }
+            } else {
+              borders.set(nl, (borders.get(nl) ?? 0) + 1);
+            }
+          }
+        }
+
+        if (!eligible || size >= MIN_CELLS || borders.size === 0) continue;
+        let bestLevel = lvl;
+        let bestCount = -1;
+        for (const [l, count] of borders) {
+          if (count > bestCount) {
+            bestCount = count;
+            bestLevel = l;
+          }
+        }
+        for (let k = 0; k < size; k++) this.level[region[k]!] = bestLevel;
+        changed = true;
+      }
+
+      if (!changed) break;
+    }
+  }
+
   private buildCorners(): void {
-    const out: Elevation = { e: 0, ramp: false, lane: 0, gorge: 0 };
+    const out: Elevation = { e: 0, ramp: false, lane: 0, gorge: 0, carve: 0 };
 
     for (let j = 0; j < CELLS; j++) {
       for (let i = 0; i < CELLS; i++) {
@@ -271,8 +478,8 @@ export class TerrainFieldData {
     const dirZ = new Float32Array(DIRS);
     for (let d = 0; d < DIRS; d++) {
       const a = (d / DIRS) * Math.PI * 2;
-      dirX[d] = Math.cos(a);
-      dirZ[d] = Math.sin(a);
+      dirX[d] = cos(a);
+      dirZ[d] = sin(a);
     }
 
     for (let j = 0; j < SAMPLE_RES; j++) {
@@ -320,8 +527,18 @@ export class TerrainFieldData {
     return j * CELLS + i;
   }
 
-  /** Exact top surface, discontinuous at cliffs. Used to build geometry. */
+  /**
+   * Exact top surface, discontinuous at cliffs. Used to build geometry.
+   *
+   * The +X half is evaluated by mirroring to −X: the corners are mirror-exact
+   * and `macro()` is even in x, so the surface is symmetric — but a sample
+   * landing exactly on a cliff edge (cell boundary) tie-breaks via `floor()`
+   * toward +x on *both* halves, picking the cliff top on one side and the
+   * cliff base on the other. Mirroring the query resolves every tie the same
+   * way and makes `heightAt` symmetric to the last bit.
+   */
   exactHeightAt(x: number, z: number): number {
+    if (x > 0) x = -x;
     const fx = clamp((x + MAP_HALF) / CELL, 0, CELLS - 0.0001);
     const fz = clamp((z + MAP_HALF) / CELL, 0, CELLS - 0.0001);
     const i = Math.floor(fx);
@@ -367,7 +584,7 @@ export class TerrainFieldData {
     const e = 1.2;
     const dx = this.heightAt(x + e, z) - this.heightAt(x - e, z);
     const dz = this.heightAt(x, z + e) - this.heightAt(x, z - e);
-    return Math.atan(Math.hypot(dx, dz) / (2 * e));
+    return atan(hypot(dx, dz) / (2 * e));
   }
 
   levelAt(x: number, z: number): number {
@@ -391,15 +608,23 @@ export class TerrainFieldData {
     return WATER_LEVEL - this.heightAt(x, z);
   }
 
-  /** Distance to the nearest lane centreline, in world units. */
+  /**
+   * Distance to the nearest lane centreline, in world units.
+   *
+   * Walks each route separately — the two routes share a head and a tail, so a
+   * flattened loop would measure against a phantom segment joining one route's
+   * end to the next route's start.
+   */
   laneDistance(x: number, z: number): number {
     const u = Math.abs(x);
     let best = 1e9;
-    for (let i = 0; i < LANE_NODES.length - 1; i++) {
-      const a = LANE_NODES[i]!;
-      const b = LANE_NODES[i + 1]!;
-      const d = segmentQuery(u, z, a.u, a.v, b.u, b.v).dist;
-      if (d < best) best = d;
+    for (const route of LANE_ROUTES) {
+      for (let i = 0; i < route.length - 1; i++) {
+        const a = route[i]!;
+        const b = route[i + 1]!;
+        const d = segmentQuery(u, z, a.u, a.v, b.u, b.v).dist;
+        if (d < best) best = d;
+      }
     }
     return best;
   }
@@ -410,7 +635,7 @@ export class TerrainFieldData {
     let best = 1e9;
     for (const l of LANDMARKS) {
       if (l.kind === 'combatZone') continue;
-      const d = Math.hypot(u - l.u, z - l.v) - l.radius;
+      const d = hypot(u - l.u, z - l.v) - l.radius;
       if (d < best) best = d;
     }
     return best;

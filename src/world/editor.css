@@ -1,0 +1,86 @@
+/* Map editor panel. Authoring chrome, so it deliberately does not follow the
+   game's gilt styling — it should never be mistaken for part of the game. */
+
+.editor {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 200;
+  width: 15rem;
+  padding: 10px 12px;
+  background: rgba(16, 18, 22, 0.95);
+  border: 1px solid #3a4048;
+  border-radius: 4px;
+  color: #dfe3e8;
+  font: 12px/1.4 system-ui, sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+}
+
+.editor h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7fd4ff;
+}
+
+.editor-tools,
+.editor-props,
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.editor button {
+  font: inherit;
+  padding: 4px 8px;
+  color: #dfe3e8;
+  background: #232830;
+  border: 1px solid #3a4048;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.editor button:hover {
+  border-color: #7fd4ff;
+}
+
+.editor button.is-active {
+  color: #0d1117;
+  background: #7fd4ff;
+  border-color: #7fd4ff;
+  font-weight: 600;
+}
+
+.editor-props button {
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
+.editor-status {
+  margin-bottom: 8px;
+  padding: 5px 6px;
+  background: #0d1117;
+  border-radius: 3px;
+  color: #8b96a5;
+  font-variant-numeric: tabular-nums;
+  /* The status carries a newline between the live selection and the totals. */
+  white-space: pre-line;
+}
+
+.editor-status::first-line {
+  color: #7fd4ff;
+  font-weight: 600;
+}
+
+.editor-help {
+  margin: 0;
+  color: #6d7885;
+  font-size: 11px;
+}
+
+.editor code {
+  color: #9fd8ff;
+}

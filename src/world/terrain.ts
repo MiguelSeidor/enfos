@@ -28,9 +28,17 @@ import {
   MAP_SIZE,
   SUB,
   lanePolyline,
+  LANE_COUNT,
 } from './layout';
 import { TerrainFieldData } from './field';
-import { createCliffMaterial, createGroundMaterial, type GroundMaterialResult } from './groundMaterial';
+import { emptyOverlay, loadOverlay, SIGHT_BLOCKERS, type MapOverlay } from './overlay';
+import { validateWorld } from './validate';
+import {
+  createCliffMaterial,
+  createGroundMaterial,
+  type CliffMaterialResult,
+  type GroundMaterialResult,
+} from './groundMaterial';
 
 /** Level difference below which two cells are considered welded. */
 const WALL_EPS = 0.12;
@@ -38,10 +46,26 @@ const WALL_EPS = 0.12;
 let activeField: TerrainFieldData | null = null;
 
 /** Shared access for the other world modules (props, water, structures). */
+/**
+ * The overlay the map is currently showing.
+ *
+ * Module-level for the same reason `activeField` is: the editor needs to read
+ * and mutate it, and threading it through the service interface would put an
+ * authoring concern into the runtime contract every other system depends on.
+ */
+let currentOverlay: MapOverlay = emptyOverlay();
+
+export function getOverlay(): MapOverlay {
+  return currentOverlay;
+}
+
 export function getField(): TerrainFieldData {
   if (!activeField) throw new Error('terrain field not built yet');
   return activeField;
 }
+
+/** Bucket size for the cover index, metres. */
+const BLOCKER_CELL = 8;
 
 export class TerrainModule implements GameModule {
   readonly id = 'terrain';
@@ -51,15 +75,18 @@ export class TerrainModule implements GameModule {
   private ground!: THREE.Mesh;
   private cliffs!: THREE.Mesh;
   private groundMat!: GroundMaterialResult;
-  private cliffMat!: GroundMaterialResult;
+  private cliffMat!: CliffMaterialResult;
   private readonly lanes = new Map<string, Vec2[]>();
 
   init(ctx: GameContext): void {
     this.field = new TerrainFieldData(ctx.match.seed);
     activeField = this.field;
 
-    this.lanes.set('0:0', lanePolyline(-1).map((p) => ({ x: p.x, z: p.z })));
-    this.lanes.set('1:0', lanePolyline(1).map((p) => ({ x: p.x, z: p.z })));
+    // Both routes, for both mirrored sites.
+    for (let route = 0; route < LANE_COUNT; route++) {
+      this.lanes.set(`0:${route}`, lanePolyline(-1, route).map((p) => ({ x: p.x, z: p.z })));
+      this.lanes.set(`1:${route}`, lanePolyline(1, route).map((p) => ({ x: p.x, z: p.z })));
+    }
 
     this.groundMat = createGroundMaterial(this.field, ctx.match.seed);
     this.cliffMat = createCliffMaterial();
@@ -78,10 +105,24 @@ export class TerrainModule implements GameModule {
     this.cliffs.matrixAutoUpdate = false;
     ctx.scene.add(this.cliffs);
 
+    // The authored overlay arrives asynchronously and is normally absent. When
+    // it is present the field is re-derived and the meshes rebuilt — a beat
+    // after first paint rather than blocking the boot, because a generated map
+    // on screen is better than a black screen while a file is fetched.
+    void loadOverlay().then((overlay) => {
+      currentOverlay = overlay;
+      // Cover is indexed even when the overlay changed no terrain: the props
+      // are what the shots have to get past.
+      this.indexBlockers(overlay);
+      if (Object.keys(overlay.terrain).length === 0) return;
+      this.applyOverlay(overlay);
+    });
+
     const service: TerrainService = {
       heightAt: (x, z) => this.field.heightAt(x, z),
       normalAt: (x, z, out) => this.normalAt(x, z, out),
       isWalkable: (x, z) => this.field.isWalkable(x, z),
+      blockerTop: (x, z) => this.blockerTop(x, z),
       lanePath: (team: TeamId, lane: number) => this.lanes.get(`${team}:${lane}`) ?? [],
       bounds: {
         minX: -MAP_HALF,
@@ -91,6 +132,24 @@ export class TerrainModule implements GameModule {
       },
     };
     ctx.services.register(TerrainKey, service);
+
+    // Under the QA harness the map's hard invariants (GDD §5: symmetry and a
+    // traversable route) are checked numerically. A violation is a console
+    // error, which fails the capture run — terrain regressions cannot slip
+    // through a "looks fine" review.
+    if (new URLSearchParams(location.search).get('qa') === '1') {
+      const report = validateWorld(this.field);
+      (window as unknown as { __TERRAIN_VALIDATION__: unknown }).__TERRAIN_VALIDATION__ = report;
+      if (report.ok) {
+        console.info(
+          `[terrain] validation ok — symmetry err ${report.symmetryMaxError.toExponential(2)}m, ` +
+            `max lane step ${report.maxLaneStepPerMetre.toFixed(2)}m/m, ` +
+            `${report.reachableLandmarks.length} landmark pads reachable`,
+        );
+      } else {
+        for (const issue of report.issues) console.error(`[terrain] validation: ${issue}`);
+      }
+    }
   }
 
   // ── Ground surface ─────────────────────────────────────────────────────────
@@ -313,7 +372,80 @@ export class TerrainModule implements GameModule {
     return geo;
   }
 
+  /**
+   * Re-derives the field from an overlay and rebuilds both meshes.
+   *
+   * Full rebuild rather than a patch of the touched cells: the ground mesh is
+   * one welded surface and the cliffs are generated from level *differences*,
+   * so a single changed cell can add or remove geometry several cells away.
+   * Tracking that dependency correctly would be far more code than rebuilding,
+   * and rebuilding is fast enough for an editor because the expensive part —
+   * elevation sampling and the blur — is not repeated.
+   */
+  applyOverlay(overlay: MapOverlay): void {
+    currentOverlay = overlay;
+    this.field.applyOverlay(overlay);
+
+    this.ground.geometry.dispose();
+    this.ground.geometry = this.buildGroundGeometry();
+    this.cliffs.geometry.dispose();
+    this.cliffs.geometry = this.buildCliffGeometry();
+
+    // The splat control map is baked from the field, so it is stale now too.
+    this.groundMat.refresh(this.field);
+  }
+
   // ── Service ────────────────────────────────────────────────────────────────
+
+  /**
+   * Authored cover, bucketed on a coarse grid.
+   *
+   * A map has tens of props and a line of sight samples every 0.6 m, so a
+   * linear scan per sample would be thousands of distance tests per shot. One
+   * bucket per 8 m cell turns it into a handful.
+   */
+  private blockerGrid = new Map<string, { x: number; z: number; r2: number; top: number }[]>();
+
+  private static blockerKey(x: number, z: number): string {
+    return `${Math.floor(x / BLOCKER_CELL)},${Math.floor(z / BLOCKER_CELL)}`;
+  }
+
+  private indexBlockers(overlay: MapOverlay): void {
+    this.blockerGrid.clear();
+    for (const prop of overlay.props) {
+      const spec = SIGHT_BLOCKERS[prop.kind];
+      if (!spec) continue;
+      const r = spec.radius * prop.scale;
+      const entry = {
+        x: prop.x,
+        z: prop.z,
+        r2: r * r,
+        top: this.field.heightAt(prop.x, prop.z) + spec.height * prop.scale,
+      };
+      // Registered in every cell its footprint touches, so a prop on a seam is
+      // found from either side.
+      for (let cx = Math.floor((prop.x - r) / BLOCKER_CELL); cx <= Math.floor((prop.x + r) / BLOCKER_CELL); cx++) {
+        for (let cz = Math.floor((prop.z - r) / BLOCKER_CELL); cz <= Math.floor((prop.z + r) / BLOCKER_CELL); cz++) {
+          const key = `${cx},${cz}`;
+          const bucket = this.blockerGrid.get(key);
+          if (bucket) bucket.push(entry);
+          else this.blockerGrid.set(key, [entry]);
+        }
+      }
+    }
+  }
+
+  private blockerTop(x: number, z: number): number {
+    const bucket = this.blockerGrid.get(TerrainModule.blockerKey(x, z));
+    if (!bucket) return 0;
+    let top = 0;
+    for (const b of bucket) {
+      const dx = x - b.x;
+      const dz = z - b.z;
+      if (dx * dx + dz * dz <= b.r2 && b.top > top) top = b.top;
+    }
+    return top;
+  }
 
   private normalAt(x: number, z: number, out: THREE.Vector3): THREE.Vector3 {
     const e = 1;

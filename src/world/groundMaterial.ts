@@ -68,6 +68,24 @@ function injectVaryings(shader: THREE.WebGLProgramParametersWithUniforms): void 
 
 export interface GroundMaterialResult {
   material: THREE.MeshStandardMaterial;
+  /**
+   * Re-bakes the splat control map from an edited field.
+   *
+   * The control map is baked on the CPU from levels and masks, so an authored
+   * terrain edit leaves it describing the map as it used to be — grass where
+   * the author just dug a channel. Only the control map is re-baked: the tint
+   * map is seeded noise and does not depend on the field.
+   */
+  refresh(field: TerrainFieldData): void;
+  dispose(): void;
+}
+
+/**
+ * The cliff material has no baked control map — it shades from world position
+ * and normal alone — so it has nothing to re-bake when the field changes.
+ */
+export interface CliffMaterialResult {
+  material: THREE.MeshStandardMaterial;
   dispose(): void;
 }
 
@@ -188,7 +206,16 @@ export function createGroundMaterial(
     shader.uniforms.uNrm2 = { value: rock.normal };
     shader.uniforms.uNrm3 = { value: path.normal };
     // World units per texture tile, per layer.
-    shader.uniforms.uLayerScale = { value: new THREE.Vector4(9.0, 12.5, 15.0, 8.5) };
+    // World metres per texture tile, per layer: grass / dirt / rock / path.
+    //
+    // Grass, dirt and rock roughly halved from 9 / 12.5 / 15. Their recipes
+    // carry real structure — three scales of grass tuft, gravel, strata — and
+    // at the old tiling none of it survived: a 45 cm tuft is a twentieth of a
+    // 9 m tile, which from the RTS camera is about three screen pixels. What
+    // reached the eye was the low-frequency value drift underneath and nothing
+    // else, which is exactly the flat green mottle the ground read as. The path
+    // keeps its 8.5 because its features are 1.4 m slabs and already resolve.
+    shader.uniforms.uLayerScale = { value: new THREE.Vector4(4.5, 6.5, 9.0, 8.5) };
     shader.uniforms.uLayerRough = { value: new THREE.Vector4(0.95, 0.98, 0.8, 0.92) };
     // The four source textures are all mid-tone browns straight from the
     // library. Separating them in hue and value is what makes the lane read as
@@ -196,7 +223,10 @@ export function createGroundMaterial(
     shader.uniforms.uTint0 = { value: new THREE.Color(0.86, 1.0, 0.74) };
     shader.uniforms.uTint1 = { value: new THREE.Color(0.9, 0.84, 0.72) };
     shader.uniforms.uTint2 = { value: new THREE.Color(1.06, 1.0, 0.9) };
-    shader.uniforms.uTint3 = { value: new THREE.Color(1.06, 1.0, 0.88) };
+    // Cooled from (1.06, 1.0, 0.88). That warm cast suited the old compacted
+    // dirt trail; over the paved recipe it turned grey granite into sandstone
+    // and the road blended back into the ground it is meant to stand out from.
+    shader.uniforms.uTint3 = { value: new THREE.Color(0.92, 0.95, 1.0) };
     shader.uniforms.uDetailScale = { value: 0.62 };
     shader.uniforms.uWaterLevel = { value: WATER_LEVEL };
 
@@ -312,6 +342,16 @@ export function createGroundMaterial(
 
   return {
     material,
+    refresh(next: TerrainFieldData): void {
+      // Re-bake into the existing texture's image and flag it, rather than
+      // swapping the texture object: the uniform was captured by
+      // `onBeforeCompile` and replacing the object would leave the compiled
+      // program pointing at the old one.
+      const rebaked = bakeControlMap(next);
+      control.image = rebaked.image;
+      control.needsUpdate = true;
+      rebaked.dispose();
+    },
     dispose(): void {
       control.dispose();
       tint.dispose();
@@ -325,7 +365,7 @@ export function createGroundMaterial(
  * plateau above it, with horizontal strata bands and a grass cap that ties the
  * face back into the ground on the upper lip.
  */
-export function createCliffMaterial(): GroundMaterialResult {
+export function createCliffMaterial(): CliffMaterialResult {
   const stone = materials.textures('cliff.stone');
   const rock = materials.textures('ground.rock');
   const grass = materials.textures('ground.grass');
