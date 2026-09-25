@@ -1,0 +1,134 @@
+/* Defeat screen. Separate file for the same reason options.css is: it is a
+   whole screen rather than a HUD widget, and it shares only the palette. */
+
+.hud-defeat {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(ellipse at center, rgba(40, 6, 6, 0.55), rgba(2, 2, 4, 0.92));
+  /* Eats pointer events on purpose: with the Core gone the match is over, and
+     leaving the world clickable underneath let the player keep issuing orders
+     into a game that had already ended. */
+  pointer-events: auto;
+  z-index: 80;
+  animation: defeat-in 0.9s ease both;
+}
+
+.hud-defeat.is-hidden {
+  display: none;
+}
+
+@keyframes defeat-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.hud-defeat-plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 2.2rem 4.5rem;
+  border-top: 2px solid rgba(196, 64, 47, 0.85);
+  border-bottom: 2px solid rgba(196, 64, 47, 0.85);
+  background: rgba(6, 3, 3, 0.72);
+  text-align: center;
+}
+
+.hud-defeat-plate b {
+  font-family: var(--ui-display);
+  font-size: 3.2rem;
+  letter-spacing: 0.3em;
+  color: var(--ui-health-bright);
+  text-shadow: 0 0 28px rgba(196, 64, 47, 0.8), 0 4px 12px #000;
+}
+
+.hud-defeat-plate i {
+  font-style: normal;
+  font-size: 1rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ui-text);
+}
+
+.hud-defeat-wave {
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  color: var(--ui-text-dim);
+  margin-top: 0.3rem;
+}
+
+/* Victory: the same screen in gold. The layout stays identical so the two
+   outcomes read as the two faces of one moment rather than two screens. */
+.hud-defeat.is-victory {
+  background: radial-gradient(ellipse at center, rgba(48, 36, 8, 0.5), rgba(2, 2, 4, 0.9));
+}
+
+.hud-defeat.is-victory .hud-defeat-plate {
+  border-color: rgba(216, 168, 62, 0.9);
+}
+
+.hud-defeat.is-victory .hud-defeat-plate b {
+  color: var(--ui-gold-bright);
+  text-shadow: 0 0 28px rgba(216, 168, 62, 0.7), 0 4px 12px #000;
+}
+
+.hud-defeat-leave {
+  margin-top: 1rem;
+}
+
+/* Sabotage strip, under the wave banner and its pause button. Red for what the
+   rival did to this team, violet (the sabotage shop's colour) for what this
+   team did to the rival. */
+.hud-sabotage {
+  position: absolute;
+  top: 6.3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem;
+  max-width: min(36rem, calc(100vw - 32px));
+  pointer-events: none;
+  z-index: 35;
+}
+
+.hud-sabotage-chip {
+  padding: 0.2rem 0.55rem;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  border-radius: 2px;
+  background: rgba(8, 6, 10, 0.78);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.hud-sabotage-chip.is-against {
+  color: #ffb3a6;
+  border: 1px solid rgba(216, 69, 47, 0.8);
+  animation: sabotage-pulse 1.2s ease-in-out infinite;
+}
+
+.hud-sabotage-chip.is-ours {
+  color: #dcc4f4;
+  border: 1px solid rgba(185, 140, 224, 0.7);
+}
+
+@keyframes sabotage-pulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
+  50% { box-shadow: 0 0 14px rgba(216, 69, 47, 0.55); }
+}
+
+/* Overtime: the wave banner in the danger palette, so the state of the match
+   is legible from the top of the screen. */
+.hud-wave.is-sudden {
+  border-color: rgba(216, 69, 47, 0.8);
+}
+
+.hud-wave.is-sudden .value {
+  color: var(--ui-health-bright);
+  letter-spacing: 0.16em;
+  animation: sabotage-pulse 1.4s ease-in-out infinite;
+}

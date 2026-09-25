@@ -1,0 +1,306 @@
+/* Online lobby. Same scrim and panel language as the options screen; the
+   palette variables come from ui.css and the frame from medieval.css. */
+
+.lobby {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(6, 8, 14, 0.72);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+  z-index: 60;
+  transition: opacity 0.22s ease;
+}
+
+.lobby.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lobby-panel {
+  width: min(40rem, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 1.1rem 1.3rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.lobby-head h2 {
+  margin: 0;
+  font-family: var(--ui-display);
+  font-size: 1.35rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ui-gold-bright);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
+}
+
+.lobby-head p {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ui-text-dim);
+}
+
+.lobby-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lobby-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--ui-text);
+  font-size: 0.9rem;
+}
+
+.lobby-input {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.35rem 0.55rem;
+  color: var(--ui-text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--ui-edge);
+  border-radius: 2px;
+  min-width: 0;
+}
+
+.lobby-input:focus {
+  outline: none;
+  border-color: var(--ui-gold);
+}
+
+.lobby-code-input {
+  width: 6.5rem;
+  text-align: center;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.lobby-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lobby-actions .lobby-primary {
+  margin-right: auto;
+}
+
+.lobby-primary {
+  border-color: var(--ui-gold) !important;
+  color: var(--ui-gold-bright) !important;
+}
+
+.lobby-subhead {
+  margin: 0.2rem 0 0;
+  font-family: var(--ui-display);
+  font-size: 0.85rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ui-gold);
+}
+
+.lobby-rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 3rem;
+}
+
+.lobby-room {
+  display: grid !important;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.8rem;
+  text-align: left;
+}
+
+.lobby-room b {
+  font-weight: 600;
+  color: var(--ui-text);
+}
+
+.lobby-room span {
+  font-size: 0.78rem;
+  color: var(--ui-text-dim);
+}
+
+.lobby-room code {
+  font-family: inherit;
+  letter-spacing: 0.25em;
+  color: var(--ui-gold-bright);
+}
+
+.lobby-empty {
+  padding: 0.55rem 0.7rem;
+  font-size: 0.82rem;
+  color: var(--ui-text-dim);
+  border: 1px dashed rgba(196, 158, 84, 0.25);
+  border-radius: 2px;
+}
+
+.lobby-codebox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.6rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-top: 1px solid var(--ui-gold-dim);
+  border-bottom: 1px solid var(--ui-gold-dim);
+}
+
+.lobby-codebox span,
+.lobby-codebox i {
+  font-size: 0.72rem;
+  font-style: normal;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ui-text-dim);
+}
+
+.lobby-codebox b {
+  font-family: var(--ui-display);
+  font-size: 2.2rem;
+  letter-spacing: 0.35em;
+  text-indent: 0.35em;
+  color: var(--ui-gold-bright);
+}
+
+.lobby-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+}
+
+@media (max-width: 520px) {
+  .lobby-teams {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lobby-team {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.lobby-team h3 {
+  margin: 0;
+  font-family: var(--ui-display);
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ui-text-dim);
+}
+
+.lobby-player {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 0.5rem;
+  padding: 0.45rem 0.6rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--ui-edge);
+  border-radius: 2px;
+}
+
+.lobby-player.is-me {
+  border-color: var(--ui-gold-dim);
+}
+
+.lobby-player b {
+  color: var(--ui-text);
+  font-weight: 600;
+}
+
+.lobby-player em {
+  font-style: normal;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ui-gold);
+}
+
+.lobby-player span {
+  grid-column: 1;
+  font-size: 0.78rem;
+  color: var(--ui-text-dim);
+}
+
+.lobby-player i {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-style: normal;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ui-xp);
+}
+
+.lobby-heroes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.5rem;
+}
+
+.lobby-hero {
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  text-align: left;
+}
+
+.lobby-hero span {
+  font-size: 0.72rem;
+  color: var(--ui-text-dim);
+}
+
+.lobby-hero.is-active {
+  border-color: var(--ui-gold) !important;
+  box-shadow: inset 0 0 0 1px var(--ui-gold-dim), 0 0 12px rgba(216, 168, 62, 0.25);
+}
+
+.lobby-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.lobby-status {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ui-text-dim);
+  text-align: center;
+}
+
+.lobby-modes {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.lobby-mode {
+  min-width: 3.4rem;
+  letter-spacing: 0.08em;
+}
+
+.lobby-mode.is-active {
+  border-color: var(--ui-gold) !important;
+  color: var(--ui-gold-bright) !important;
+}
+
+.lobby-swap {
+  margin-top: 0.15rem;
+  font-size: 0.75rem !important;
+}

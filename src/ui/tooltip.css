@@ -1,0 +1,64 @@
+/* In-game tooltip. Shares the HUD's gilt palette; kept in its own file because
+   it is a floating layer rather than a HUD widget. */
+
+.tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 90;
+  max-width: 22rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.55rem 0.75rem;
+  background: linear-gradient(180deg, rgba(24, 22, 18, 0.97), rgba(10, 9, 7, 0.98));
+  border: 1px solid var(--ui-gold-dim);
+  border-radius: 2px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 233, 168, 0.12);
+  /* Never a hover target itself, or it would chase the cursor away from the
+     element it describes. */
+  pointer-events: none;
+  /* No transition on transform: the panel must track the cursor exactly, and
+     easing its position makes it swim. Only the fade is animated. */
+  transition: opacity 0.09s ease;
+}
+
+.tip.is-hidden {
+  opacity: 0;
+}
+
+.tip b {
+  font-family: var(--ui-display);
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--ui-gold-bright);
+  text-shadow: 0 1px 2px #000;
+}
+
+.tip i {
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ui-text);
+}
+
+.tip-meta {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ui-text-dim);
+  margin-top: 0.15rem;
+}
+
+.tip-warn {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ui-health-bright);
+}
+
+/* Collapsed rather than hidden, so the gap between rows does not survive an
+   empty line and leave the panel looking bottom-heavy. */
+.tip .is-empty {
+  display: none;
+}

@@ -1,0 +1,982 @@
+/**
+ * Touch layouts. Owner: UI agent.
+ *
+ * A separate file for the same reason pause.css is separate: this one owns a
+ * single question, "what does the HUD become when there is no mouse and the
+ * screen is 390 px tall", and keeping it out of ui.css means the desktop skin
+ * cannot be broken by a phone fix or the other way round. Imported last from
+ * src/ui/index.ts so it wins every cascade tie against ui.css and medieval.css
+ * without needing !important to do it.
+ *
+ * Everything here is gated on `(pointer: coarse)` together with a width or a
+ * height, never on a user-agent string: a Surface in tablet mode and an iPad
+ * want the same layout, and a phone-sized desktop window wants the desktop one.
+ *
+ * Touch targets are stated in absolute pixels rather than rem. The root scale
+ * in index.ts bottoms out at 12 px on a small screen, so a target sized in rem
+ * would be quietly shrunk by exactly the viewports that need it biggest.
+ */
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Pieces that exist only for touch.
+
+   Declared outside every media query and switched off by default, so a desktop
+   window never renders them no matter what state the HUD is in. The markup for
+   both lives in hud.ts and index.ts because neither can be produced in CSS.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* The rail of tray toggles that stands in for the minimap, the bag and the
+   attribute list once those boxes have been lifted out of the bottom bar. */
+.hud-rail {
+  display: none;
+}
+
+/* The attribute list's wrapper. `display: contents` makes the element itself
+   disappear from layout, so on a desktop window the grid inside it is a direct
+   flex child of `.vitals` exactly as it was before the wrapper existed, and the
+   frame classes it carries paint nothing. */
+.hud-stats-sheet {
+  display: contents;
+}
+
+/* A box that generates no box still generates its pseudo-elements, and the
+   gilt corner flourish is absolutely positioned: left alone it would resolve
+   against the hero box and stud that panel's corners a second time. */
+.hud-stats-sheet::before {
+  display: none;
+}
+
+/* Only the panel form of the sheet wants a heading. Inside the hero box the
+   bars are label enough, and a second title there would push them down. */
+.hud-stats-sheet > .box-title {
+  display: none;
+}
+
+/* The portrait gate. Mounted on <body> rather than inside #ui-root so its
+   stacking is its own business and nothing in the HUD can ever paint over it. */
+.rotate-gate {
+  display: none;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Shared touch behaviour, at any size.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@media (pointer: coarse) {
+  /* The keyboard hint names keys a phone does not have. It is not merely
+     redundant there, it is wrong. */
+  .hud-hint {
+    display: none;
+  }
+
+  /* Pause and surrender are 2.2rem, which is 26 px once the root scale has
+     bottomed out: a target you have to aim at with a fingertip. They keep
+     their place under the wave banner, which is the top edge rather than the
+     dead centre of the bottom, so the thumb rule is not violated by growing
+     them. */
+  .pause-button {
+    width: 44px;
+    height: 44px;
+    font-size: 17px;
+  }
+
+  /* The pair carries a centring translate of its own, so a press cannot simply
+     set `transform`: it would throw the button across the screen. The resting
+     transform is held in a variable that the press composes a scale onto, and
+     that the phone layout below reassigns when it moves the cluster. */
+  .pause-button:not(.surrender-button) {
+    --press-rest: translate(-50%, 3.4rem) translateX(-1.6rem);
+    transform: var(--press-rest);
+  }
+
+  .surrender-button {
+    --press-rest: translate(-50%, 3.4rem) translateX(1.6rem);
+    transform: var(--press-rest);
+  }
+
+  /* Press feedback, because a touch screen gives none of its own: there is no
+     cursor to change and no hover to light up, so the only confirmation that a
+     tap landed is the target moving under the finger. */
+  .command,
+  .inv-slot.is-usable,
+  .hud-rail-btn,
+  .pause-button,
+  .menu-btn,
+  .levelup-row {
+    transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .command:active:not(:disabled),
+  .inv-slot.is-usable:active,
+  .hud-rail-btn:active,
+  .menu-btn:active:not(:disabled),
+  .levelup-row:active {
+    transform: scale(0.97);
+  }
+
+  .pause-button:not(.surrender-button):active,
+  .surrender-button:active {
+    transform: var(--press-rest) scale(0.97);
+  }
+}
+
+@media (pointer: coarse) and (prefers-reduced-motion: reduce) {
+  .command,
+  .inv-slot.is-usable,
+  .hud-rail-btn,
+  .pause-button,
+  .menu-btn,
+  .levelup-row {
+    transition: none;
+  }
+
+  .command:active:not(:disabled),
+  .inv-slot.is-usable:active,
+  .hud-rail-btn:active,
+  .menu-btn:active:not(:disabled),
+  .levelup-row:active {
+    transform: none;
+  }
+
+  /* Back to the resting transform rather than to `none`, which for these two
+     would be a jump out of the cluster instead of a cancelled animation. */
+  .pause-button:not(.surrender-button):active,
+  .surrender-button:active {
+    transform: var(--press-rest);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Hover is a lie on a touch screen.
+
+   A tap latches :hover on the tapped element until the next tap somewhere
+   else, so every ability the player had just cast stayed lit as though it were
+   armed. ui.css wraps its own hover rules in a `(hover: hover)` query; the two
+   that live in medieval.css and pause.css cannot be edited from here, so the
+   resting values are restated instead. The literals below are copied verbatim
+   from those files rather than invented.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@media (hover: none) {
+  .command:hover:not(:disabled),
+  .inv-slot.is-usable:hover {
+    border-color: #57452a;
+    color: var(--ui-gold);
+    box-shadow:
+      inset 0 1px 0 rgba(245, 221, 162, 0.12),
+      inset 0 -2px 3px rgba(0, 0, 0, 0.6);
+  }
+
+  .pause-button:hover {
+    border-color: #8a6d31;
+    color: var(--ui-gold-bright);
+  }
+
+  .surrender-button:hover {
+    border-color: #7a3a32;
+    color: #e2a09a;
+  }
+
+  /* The surrender confirmation inside the pause plate. It states its colours
+     with !important to beat the generic button rule, so the reset has to as
+     well or the latched hover wins. */
+  .pause-actions .is-danger:hover {
+    border-color: #7a3a32 !important;
+    color: #e2a09a !important;
+  }
+
+  /* Options panel segments. `:not()` on the selected states, because those are
+     declared at the same specificity in options.css and an unguarded reset
+     here would beat them and leave the chosen option looking unchosen. */
+  .options-seg:hover:not(.is-active),
+  .options-switch:hover:not(.is-on) {
+    color: var(--ui-text-dim);
+    border-color: rgba(196, 158, 84, 0.28);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Tablet, landscape.
+
+   A 1024 x 768 screen has room for the four-box bar the desktop uses, and the
+   bar is the part of this interface the owner likes, so it stays. The only
+   thing actually wrong with it on a tablet is that every target is sized for a
+   mouse: the command cells come out at 36 px and the bag slots at 34 px. They
+   are restated in pixels, the boxes are allowed to grow to fit, and the chrome
+   is pushed clear of the notch.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@media (pointer: coarse) and (orientation: landscape) and (min-height: 501px) {
+  .hud-bar {
+    padding-left: calc(0.5rem + env(safe-area-inset-left));
+    padding-right: calc(0.5rem + env(safe-area-inset-right));
+    padding-bottom: calc(0.4rem + env(safe-area-inset-bottom));
+  }
+
+  /* The four boxes are told to be at least 12.6rem tall so their top edges
+     line up. With finger-sized cells inside they are taller than that anyway,
+     and the floor only gets in the way of the tallest one setting the height. */
+  .hud-box {
+    min-height: 0;
+  }
+
+  .box-command {
+    width: auto;
+  }
+
+  .hud-command {
+    grid-template-columns: repeat(4, 56px);
+    grid-auto-rows: 56px;
+    /* Two rows, which is exactly the hero's four abilities plus the level-up
+       cross and three orders. A shop's stock still scrolls. */
+    height: 118px;
+    gap: 6px;
+    padding-right: 0;
+    overscroll-behavior: contain;
+  }
+
+  .command {
+    /* The !important is not a preference: ui.css states these with !important
+       of its own to fend off two legacy rules that share the class name. */
+    width: 56px !important;
+    height: auto !important;
+    min-height: 56px;
+  }
+
+  .command .cd-text {
+    font-size: 15px;
+  }
+
+  .hud-inventory {
+    grid-template-columns: repeat(3, 48px);
+    grid-auto-rows: 48px;
+    gap: 6px;
+  }
+
+  .hud-minimap {
+    width: 150px;
+    height: 150px;
+  }
+
+  .hud-core {
+    top: calc(0.9rem + env(safe-area-inset-top));
+    left: calc(0.9rem + env(safe-area-inset-left));
+  }
+
+  .hud-wave {
+    top: calc(0.9rem + env(safe-area-inset-top));
+  }
+
+  .hud-resources {
+    top: calc(0.9rem + env(safe-area-inset-top));
+    right: calc(0.9rem + env(safe-area-inset-right));
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Phone, landscape.
+
+   Here the bar has to go. Four boxes on a straight baseline need 240 px of a
+   390 px screen, and the middle of that baseline is the one place a player
+   holding the device in two hands can never reach anyway.
+
+   So the strip becomes a frame and its contents move to the corners:
+
+     bottom right  abilities, the thing a touch player reaches for constantly,
+                   at 56 px for the four spells and 48 px for the orders below
+     bottom left   the hero's portrait and bars, read but never tapped
+     beside it     a rail of three 48 px toggles
+     centre bottom nothing at all
+
+   The minimap, the bag and the attribute list are each a panel one of those
+   toggles opens above the cluster, and only one is ever open. That is one
+   decision applied three times rather than three different disappearing acts,
+   which is what makes the rail learnable.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  /* How far above the bottom cluster an opened tray has to start. The hero box
+     is content sized, so this is stated once here and read by all three trays
+     rather than repeated as a magic number in each. */
+  .hud-bar {
+    --hud-tray: 100px;
+    display: block;
+    top: 0;
+    padding: 0;
+    gap: 0;
+  }
+
+  /* The ivy band is drawn along the top edge of the strip and the creepers
+     along its sides. With the strip gone they would run across the middle of
+     the battlefield and down both edges of the screen. */
+  .hud-bar::before,
+  .hud-bar::after {
+    display: none;
+  }
+
+  /* `border-box`, so the widths below are the widths the corners actually take
+     and the gap between the vitals and the rail beside it is the 6 px it says
+     it is rather than 6 minus a padding and two borders. */
+  .hud-box {
+    position: absolute;
+    box-sizing: border-box;
+    min-height: 0;
+    padding: 5px 6px;
+  }
+
+  /* ── Abilities, bottom right ───────────────────────────────────────── */
+
+  .box-command {
+    right: calc(6px + env(safe-area-inset-right));
+    bottom: calc(5px + env(safe-area-inset-bottom));
+    width: auto;
+    padding: 5px;
+  }
+
+  /* "Órdenes" costs 22 px of a 390 px screen to say what the icons already
+     say. The card is the only thing in that corner. */
+  .box-command > .box-title {
+    display: none;
+  }
+
+  .hud-command {
+    grid-template-columns: repeat(4, 56px);
+    /* The first row is Q W E R and gets the 56 px the abilities deserve. The
+       second row is the level-up cross and three orders, which are used once a
+       wave rather than once a second, so they sit at the 48 px floor and give
+       the world back 8 px of height. */
+    grid-template-rows: 56px 48px;
+    grid-auto-rows: 48px;
+    height: 110px;
+    gap: 6px;
+    padding-right: 0;
+    overscroll-behavior: contain;
+  }
+
+  .command {
+    width: 56px !important;
+    /* `auto` rather than a figure, so the cell takes the height of the row it
+       landed in: 56 px on the ability row, 48 px below it. */
+    height: auto !important;
+    min-height: 48px;
+  }
+
+  .command .cd-text {
+    font-size: 15px;
+  }
+
+  /* The hotkey badge names a key that is not there. */
+  .command .key {
+    display: none;
+  }
+
+  /* ── Vitals, bottom left ───────────────────────────────────────────── */
+
+  .box-hero {
+    left: calc(6px + env(safe-area-inset-left));
+    bottom: calc(5px + env(safe-area-inset-bottom));
+    width: 200px;
+    flex: none;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .box-hero .portrait {
+    width: 46px;
+    height: 46px;
+    flex: none;
+  }
+
+  .box-hero .portrait .level {
+    right: -3px;
+    bottom: -3px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 3px;
+    font-size: 10px;
+  }
+
+  .box-hero .vitals {
+    width: auto;
+    gap: 3px;
+  }
+
+  .box-hero .vitals .name {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+  }
+
+  .box-hero .bar {
+    height: 15px;
+  }
+
+  .box-hero .bar span {
+    font-size: 10px;
+  }
+
+  .box-hero .bar.xp {
+    height: 4px;
+  }
+
+  /* ── The rail ──────────────────────────────────────────────────────── */
+
+  .hud-rail {
+    position: absolute;
+    /* 6 px gutter, the 200 px hero box, 6 px gap. */
+    left: calc(212px + env(safe-area-inset-left));
+    bottom: calc(5px + env(safe-area-inset-bottom));
+    display: flex;
+    gap: 6px;
+    pointer-events: auto;
+  }
+
+  .hud-rail-btn {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    font: inherit;
+    color: var(--ui-gold);
+    /* The frame comes from the ui-panel/ui-gilt classes the markup carries, so
+       the rail is made of the same metal as the boxes it replaced. */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .hud-rail-btn[aria-pressed='true'] {
+    color: var(--ui-gold-bright);
+    border-color: var(--ui-gold-bright);
+  }
+
+  /* ── The three trays ───────────────────────────────────────────────── */
+
+  .box-minimap,
+  .box-inventory {
+    display: none;
+    left: calc(6px + env(safe-area-inset-left));
+    bottom: calc(var(--hud-tray) + env(safe-area-inset-bottom));
+    z-index: 3;
+  }
+
+  .hud.is-map-open .box-minimap,
+  .hud.is-bag-open .box-inventory {
+    display: flex;
+    animation: tray-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  .box-minimap {
+    padding: 5px;
+  }
+
+  .hud-minimap {
+    width: 164px;
+    height: 164px;
+  }
+
+  .hud-inventory {
+    grid-template-columns: repeat(3, 50px);
+    grid-auto-rows: 50px;
+    gap: 5px;
+  }
+
+  /* The attribute list stops being part of the hero box and becomes the third
+     tray. It is lifted out of `.vitals` by its wrapper, which is positioned
+     against `.box-hero` and therefore opens directly above it. */
+  .hud-stats-sheet {
+    display: none;
+    position: absolute;
+    /* Anchored to the hero box rather than to the viewport, because that is
+       what it is the detail view of: it opens directly above the bars whose
+       numbers it explains, and it follows them if the box ever moves. */
+    left: 0;
+    bottom: calc(100% + 14px);
+    z-index: 3;
+    width: 168px;
+    padding: 5px 7px 7px;
+  }
+
+  .hud.is-stats-open .hud-stats-sheet {
+    display: block;
+    animation: tray-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  .hud-stats-sheet::before {
+    display: block;
+  }
+
+  .hud-stats-sheet > .box-title {
+    display: block;
+  }
+
+  /* One column, not two: 184 px of width cannot hold two, and a single column
+     of eight rows is shorter than the hero box is far from the top anyway. */
+  .hud-stats {
+    grid-template-columns: max-content;
+    gap: 1px;
+    margin-top: 0;
+    max-width: none;
+    overflow: visible;
+  }
+
+  /* ui.css drops the stat icons once the hero box is under 340 px wide, which
+     it now always is. In the tray the width is the tray's own, and the icons
+     are what let a figure be found without reading the label. */
+  .hud-stats .stat-icon {
+    display: inline-flex;
+  }
+
+  .hud-stats .stat-row {
+    grid-template-columns: 13px 5.9rem auto auto;
+    padding: 2px 2px;
+  }
+
+  /* ── Top chrome ────────────────────────────────────────────────────── */
+
+  .hud-core {
+    top: calc(5px + env(safe-area-inset-top));
+    left: calc(6px + env(safe-area-inset-left));
+    min-width: 0;
+    width: 128px;
+    padding: 4px 8px 5px;
+    gap: 3px;
+  }
+
+  .hud-core .label {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+
+  .hud-core .pips {
+    gap: 2px;
+  }
+
+  .hud-core .pip {
+    height: 7px;
+  }
+
+  .hud-wave {
+    top: calc(5px + env(safe-area-inset-top));
+    min-width: 0;
+    gap: 10px;
+    padding: 2px 12px 3px;
+  }
+
+  .hud-wave .label {
+    font-size: 9px;
+    letter-spacing: 0.16em;
+  }
+
+  .hud-wave .value {
+    font-size: 16px;
+  }
+
+  .hud-wave .timer {
+    font-size: 13px;
+  }
+
+  .hud-resources {
+    top: calc(5px + env(safe-area-inset-top));
+    right: calc(6px + env(safe-area-inset-right));
+    gap: 5px;
+  }
+
+  .res {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  .res .dot {
+    width: 8px;
+    height: 8px;
+  }
+
+  /* Pause and surrender move to the right of the wave banner instead of under
+     it. Tucked underneath they reached 96 px down a 390 px screen, which is a
+     quarter of the battlefield spent on two buttons that are pressed twice a
+     match. Placed with `left` rather than a translate, so the press scale has
+     nothing to compose with. */
+  .pause-button:not(.surrender-button),
+  .surrender-button {
+    --press-rest: translateX(0);
+    /* Restated alongside the variable rather than left to the rule above, so
+       there is no question which declaration is supplying the transform once
+       the cluster has stopped being centred on the banner. */
+    transform: var(--press-rest);
+    top: calc(5px + env(safe-area-inset-top));
+  }
+
+  .pause-button:not(.surrender-button) {
+    left: calc(50% + 72px);
+  }
+
+  .surrender-button {
+    left: calc(50% + 122px);
+  }
+
+  /* ── Everything else that was pinned to the old bar's height ───────── */
+
+  /* The attribute panel used to sit above the bar's left end, which is now the
+     vitals box. It goes over the command card instead: the cross that opens it
+     is in that corner, so the panel appears where the finger already is. */
+  .levelup {
+    left: auto;
+    right: calc(6px + env(safe-area-inset-right));
+    bottom: calc(130px + env(safe-area-inset-bottom));
+    width: 190px;
+    /* Whatever is left between the command card it sits on and the resource
+       counters in the corner above it. dvh, not vh: on a phone `vh` is the
+       address-bar-expanded height, so a panel measured against it is taller
+       than the screen the moment that bar retracts. */
+    max-height: calc(100dvh - 190px);
+    overflow-y: auto;
+    padding: 0.5rem;
+  }
+
+  .hud-perf {
+    top: calc(44px + env(safe-area-inset-top));
+    bottom: auto;
+    right: calc(6px + env(safe-area-inset-right));
+  }
+
+  .hud-downed {
+    top: 18%;
+  }
+
+  .shop {
+    max-height: calc(100dvh - 40px);
+  }
+}
+
+/* Narrow phones, where an iPhone SE in landscape is 667 px wide and the bottom
+   cluster has to give a little back so the centre stays empty. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) and (max-width: 720px) {
+  .box-hero {
+    width: 168px;
+  }
+
+  .hud-rail {
+    left: calc(180px + env(safe-area-inset-left));
+  }
+
+  .hud-command {
+    grid-template-columns: repeat(4, 52px);
+    grid-template-rows: 52px 48px;
+    height: 106px;
+  }
+
+  .command {
+    width: 52px !important;
+  }
+}
+
+/* A tray rises the short distance it was hidden behind. Opacity and transform
+   only, so it composites without touching layout while the wave is running. */
+@keyframes tray-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud.is-map-open .box-minimap,
+  .hud.is-bag-open .box-inventory,
+  .hud.is-stats-open .hud-stats-sheet {
+    animation: none;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The portrait gate.
+
+   The game is a landscape RTS: a portrait phone cannot show the bar, the
+   world and the wave banner at once, and no amount of stacking makes it
+   playable. Rather than degrade, it asks. Gated on `(pointer: coarse)` so a
+   tall desktop window is never locked out of the game.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@media (orientation: portrait) and (pointer: coarse) {
+  .rotate-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: grid;
+    place-items: center;
+    /* Takes pointer events on purpose. The canvas underneath is still live and
+       a stray tap would order the hero somewhere the player cannot see. */
+    pointer-events: auto;
+    padding: calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+      calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
+    font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+    color: var(--ui-text);
+    user-select: none;
+    background:
+      radial-gradient(ellipse at 50% 38%, rgba(120, 92, 48, 0.22) 0%, rgba(0, 0, 0, 0) 62%),
+      linear-gradient(180deg, #14120f 0%, #05070c 100%);
+  }
+
+  .rotate-gate-plate {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 2rem 1.6rem 1.7rem;
+    max-width: 22rem;
+    text-align: center;
+    animation: rotate-gate-in 260ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  /* The device outline turns, holds on its side, and turns back. Every moving
+     segment of the loop is 280 ms of ease-out; the rest of the cycle is a
+     hold, which is what makes it read as a slow instruction rather than a
+     spinning ornament. */
+  .rotate-gate-device {
+    color: var(--ui-gold);
+    line-height: 0;
+    animation: rotate-gate-turn 2.8s cubic-bezier(0.23, 1, 0.32, 1) infinite;
+  }
+
+  .rotate-gate-rule {
+    width: 7rem;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      rgba(201, 162, 83, 0) 0%,
+      rgba(201, 162, 83, 0.85) 50%,
+      rgba(201, 162, 83, 0) 100%
+    );
+  }
+
+  .rotate-gate-plate b {
+    font-family: var(--ui-display);
+    font-size: 1.5rem;
+    line-height: 1.2;
+    letter-spacing: 0.16em;
+    text-indent: 0.16em;
+    text-transform: uppercase;
+    color: var(--ui-gold-bright);
+    text-shadow: 0 0 22px rgba(245, 221, 162, 0.3), 0 3px 10px #000;
+  }
+
+  .rotate-gate-plate i {
+    font-style: normal;
+    font-size: max(13px, 0.86rem);
+    line-height: 1.5;
+    color: var(--ui-text-dim);
+  }
+
+  .rotate-gate-plate em {
+    font-style: normal;
+    font-size: max(10px, 0.64rem);
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--ui-gold-text);
+  }
+}
+
+@keyframes rotate-gate-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes rotate-gate-turn {
+  0%,
+  26% {
+    transform: rotate(0deg);
+  }
+  36%,
+  74% {
+    transform: rotate(-90deg);
+  }
+  84%,
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotate-gate-plate,
+  .rotate-gate-device {
+    animation: none;
+  }
+
+  /* Held at the angle the instruction is asking for, so the still frame still
+     says which way to turn the device. */
+  .rotate-gate-device {
+    transform: rotate(-90deg);
+  }
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Who owns a finger that lands on the HUD
+
+   The canvas declares `touch-action: none` so the gesture layer can claim
+   every finger on the world. The panels have to say the same thing for
+   themselves, or the browser treats a drag that starts on a panel as a page
+   scroll and steals it before any handler runs: a pan begun on the vitals box
+   would simply die. The two regions that genuinely scroll, a shop's stock and
+   the level-up list, opt back in on their own axis only.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@media (pointer: coarse) {
+  .hud-box,
+  .hud-rail,
+  .hud-tray,
+  .hud-core,
+  .hud-wave,
+  .hud-resources,
+  .pause-button,
+  .surrender-button {
+    touch-action: none;
+  }
+
+  .hud-command,
+  .levelup,
+  .shop {
+    touch-action: pan-y;
+  }
+}
+
+
+/* The epithet after the comma is the first thing to go when the box narrows:
+   "TALON, OJO DE L..." reads as a broken string, "TALON" reads as a name. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  .vitals .name-title {
+    display: none;
+  }
+}
+
+.vitals .name-main {
+  /* `b` would otherwise bold a face that is already carrying the emphasis
+     through size and letter spacing. */
+  font-weight: inherit;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   The screens before the match
+
+   The HUD was the loud problem, but a player on a phone meets the title, the
+   hero select and the lobby first, and those were laid out for a desktop
+   window. On a 844x390 screen the four hero cards stacked into a 1070 px
+   column: the heading sat 400 px above the viewport and the button that starts
+   the match sat 350 px below it. Nothing about that is playable.
+
+   The fix is the same one the roster on the marketing page uses: one card at a
+   time on a rail the thumb flicks through, with the detail that does not fit
+   simply not shown. A phone player picks a hero by name and role; the full
+   ability text belongs on a screen that has room for it.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  .hero-select {
+    /* No height of its own: the panel is already pinned to all four edges,
+       and stating a viewport height on top of that made it taller than the
+       window wherever dvh reports the address-bar-retracted height. The zero
+       min-height is what lets the rail below shrink instead of pushing the
+       actions row off the bottom. */
+    min-height: 0;
+    padding: 0.6rem calc(0.6rem + env(safe-area-inset-right)) calc(0.6rem + env(safe-area-inset-bottom))
+      calc(0.6rem + env(safe-area-inset-left));
+    gap: 0.5rem;
+    justify-content: flex-start;
+    overflow: hidden;
+  }
+
+  .hero-select-head h2 {
+    font-size: 1.05rem;
+  }
+
+  /* The subtitle is the first thing to go: the heading already says what this
+     screen is. */
+  .hero-select-head p {
+    display: none;
+  }
+
+  .hero-grid {
+    flex-wrap: nowrap;
+    align-self: stretch;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    gap: 0.6rem;
+    padding: 0 0.2rem 0.3rem;
+    /* Takes what is left between the heading and the actions row, and no more.
+       The cards are centred in that band rather than stretched to fill it: a
+       card with its prose hidden has nothing to put in the extra height. */
+    align-items: center;
+    flex: 1 1 auto;
+    min-height: 0;
+    scrollbar-width: none;
+  }
+
+  .hero-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hero-card {
+    width: 16rem;
+    flex: 0 0 auto;
+    scroll-snap-align: center;
+    padding: 0.6rem;
+    gap: 0.4rem;
+    overflow: hidden;
+  }
+
+  .hero-card-portrait {
+    height: 4.6rem;
+  }
+
+  /* Prose and the full kit do not fit; the name, the role and the vitals do,
+     and those are what a pick is actually made on. */
+  .hero-card-blurb,
+  .hero-card-abilities {
+    display: none;
+  }
+
+  .hero-card-head em {
+    display: block;
+  }
+
+  .hero-select-actions {
+    flex: 0 0 auto;
+    gap: 0.5rem;
+  }
+}
+
+/* Every button on these screens is something a finger has to hit, so they all
+   clear 44 px on a touch device however small the window is. */
+@media (pointer: coarse) {
+  .hero-select-actions .menu-btn,
+  .menu-btn.is-compact,
+  .lobby-mode,
+  .lobby-room,
+  .lobby-hero,
+  .lobby-swap,
+  .lobby-input {
+    min-height: 44px;
+  }
+
+  .lobby-panel {
+    max-height: 100dvh;
+  }
+
+  .lobby-code-input {
+    /* 16px is the size below which iOS zooms the page on focus, and the extra
+       width stops the tracked-out placeholder clipping its last letter. */
+    font-size: 16px;
+    width: 8.5rem;
+    letter-spacing: 0.22em;
+  }
+}

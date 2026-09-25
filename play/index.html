@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Núcleo Eterno</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%;
+        overflow: hidden; background: #05070c;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      #app { position: fixed; inset: 0; }
+      #viewport { display: block; width: 100%; height: 100%; }
+      /* Touch input, added as its own rule so it is clear what belongs to the
+         gesture layer. The canvas has to own every finger that lands on it:
+         without `touch-action: none` the browser claims a drag as a scroll and
+         a two-finger gesture as a page zoom, and it claims them *before* any
+         handler runs, so no amount of preventDefault gets them back. The rest
+         stops a long press from selecting the page, raising the iOS callout
+         menu, or flashing a grey highlight over the frame. `touch.ts` sets the
+         same properties on the element at boot; having them here as well means
+         they are in force for the frames before the module runs. */
+      #viewport {
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      /* No pull-to-refresh or rubber-band on the page itself: the game does its
+         own rubber-banding at the camera's pan limits, and a browser gesture
+         reloading the match mid-wave is unrecoverable. */
+      html, body { overscroll-behavior: none; }
+      /* Only the container is styled here. The `> *` pointer-events rule that
+         used to live alongside it was an ID selector, so it outranked every
+         class rule in ui.css, including `.menu.is-hidden { pointer-events:
+         none }`, which left the faded-out title screen swallowing every click
+         aimed at the hero-select panel underneath it. The equivalent rule now
+         lives in ui.css at class specificity, where components can override it. */
+      #ui-root { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+      #boot {
+        position: fixed; inset: 0; z-index: 100;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 18px; background: #05070c; color: #cfd8e3;
+        transition: opacity 500ms ease; letter-spacing: 0.14em; text-transform: uppercase;
+        font-size: 12px;
+      }
+      #boot.hidden { opacity: 0; pointer-events: none; }
+      #boot-bar { width: 280px; height: 2px; background: #1b2431; overflow: hidden; }
+      #boot-bar > i { display: block; height: 100%; width: 0%; background: #c8a253; transition: width 220ms ease; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="viewport"></canvas>
+    </div>
+    <div id="ui-root"></div>
+    <div id="boot">
+      <div id="boot-label">Inicializando</div>
+      <div id="boot-bar"><i></i></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

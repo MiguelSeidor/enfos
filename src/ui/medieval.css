@@ -1,0 +1,210 @@
+/**
+ * Medieval dressing for the HUD.
+ *
+ * Layered on top of `ui.css` rather than replacing it: that file owns layout
+ * and the palette, this one owns ornament. Keeping them apart means a change to
+ * where a box *sits* cannot accidentally break how it is *framed*, which is
+ * exactly the kind of coupling that made the stat panel escape its box earlier.
+ *
+ * Everything here is drawn with gradients and inline SVG data URIs. No image
+ * files: ornament that scales with the UI's rem sizing has to be vector, and a
+ * handful of data URIs is cheaper than the HTTP requests and the asset licences
+ * that bitmap frames would bring.
+ */
+
+/* ── Panels: aged leather over dark oak ───────────────────────────────────
+   The hammered-iron base in ui.css reads as sci-fi more than medieval. These
+   three layers sit on top of it: a vertical grain, a fine leather tooth, and a
+   warm centre bloom so a large panel is not one dead value. */
+.ui-panel {
+  background:
+    /* Warm bloom, so the middle of a wide box lifts slightly. */
+    radial-gradient(
+      ellipse 120% 90% at 50% 0%,
+      rgba(120, 92, 48, 0.16) 0%,
+      rgba(0, 0, 0, 0) 70%
+    ),
+    /* Vertical grain, like planed timber. */
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 236, 196, 0.028) 0 1px,
+      rgba(0, 0, 0, 0.05) 1px 3px,
+      rgba(0, 0, 0, 0) 3px 7px
+    ),
+    /* Leather tooth: the original diagonal hatch, kept. */
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.03) 0 2px,
+      rgba(0, 0, 0, 0) 2px 5px
+    ),
+    linear-gradient(180deg, #2a2318 0%, #191309 100%);
+  border: 1px solid #4a3c22;
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(245, 221, 162, 0.13),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.55),
+    0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+/* ── Gilded frame: a chased double rule plus corner filigree ───────────── */
+.ui-gilt {
+  border: 1px solid #8a6d31;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 2px rgba(196, 158, 84, 0.34),
+    inset 0 0 14px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(245, 221, 162, 0.14),
+    0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+/**
+ * Corner flourishes.
+ *
+ * One element carrying four copies of the same SVG, mirrored by
+ * `background-position` and per-corner rotation baked into four separate URIs
+ * would be wasteful — instead the single glyph is drawn pointing into the
+ * top-left, and the other three corners reuse it under `scale()` transforms via
+ * the `::after` siblings below. Simpler in practice: four positioned copies of
+ * one asset, each rotated by its own wrapper is more markup than this is worth,
+ * so the glyph is symmetric enough to read at every corner.
+ */
+.ui-gilt::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  pointer-events: none;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'><path d='M1 7 C1 3.5 3.5 1 7 1 M1 12 C1 5 5 1 12 1' fill='none' stroke='%23c9a253' stroke-width='1.3' stroke-linecap='round'/><circle cx='3.2' cy='3.2' r='1.25' fill='%23e0b64a'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'><path d='M17 7 C17 3.5 14.5 1 11 1 M17 12 C17 5 13 1 6 1' fill='none' stroke='%23c9a253' stroke-width='1.3' stroke-linecap='round'/><circle cx='14.8' cy='3.2' r='1.25' fill='%23e0b64a'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'><path d='M1 11 C1 14.5 3.5 17 7 17 M1 6 C1 13 5 17 12 17' fill='none' stroke='%23c9a253' stroke-width='1.3' stroke-linecap='round'/><circle cx='3.2' cy='14.8' r='1.25' fill='%23e0b64a'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'><path d='M17 11 C17 14.5 14.5 17 11 17 M17 6 C17 13 13 17 6 17' fill='none' stroke='%23c9a253' stroke-width='1.3' stroke-linecap='round'/><circle cx='14.8' cy='14.8' r='1.25' fill='%23e0b64a'/></svg>");
+  background-position: left top, right top, left bottom, right bottom;
+  background-repeat: no-repeat;
+  opacity: 0.9;
+}
+
+/* ── Ivy along the command bar ─────────────────────────────────────────────
+   The bar is the one piece of chrome that is always on screen, so it is where
+   ornament earns its cost. A tiling stem with alternating leaves runs the full
+   width above the boxes.
+
+   `pointer-events: none` matters: the bar sits over the world and a decorative
+   strip that swallowed clicks would eat move orders along the whole bottom of
+   the screen. */
+.hud-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 26px;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='26' viewBox='0 0 140 26'><g fill='none' stroke='%235d6b34' stroke-width='2.1' stroke-linecap='round'><path d='M0 20 C 18 8, 34 8, 46 20 S 76 32, 92 20 S 122 8, 140 20'/></g><g fill='%236f7f3e'><ellipse cx='22' cy='9' rx='6.5' ry='3.4' transform='rotate(-28 22 9)'/><ellipse cx='40' cy='11' rx='5' ry='2.7' transform='rotate(22 40 11)'/><ellipse cx='70' cy='24' rx='6' ry='3.2' transform='rotate(18 70 24)'/><ellipse cx='104' cy='10' rx='6.2' ry='3.3' transform='rotate(-24 104 10)'/><ellipse cx='124' cy='13' rx='4.6' ry='2.5' transform='rotate(26 124 13)'/></g><g fill='%238a9a4d' opacity='0.75'><ellipse cx='31' cy='14' rx='3.4' ry='1.9' transform='rotate(-14 31 14)'/><ellipse cx='88' cy='16' rx='3.2' ry='1.8' transform='rotate(20 88 16)'/></g><g fill='%23c9a253'><circle cx='55' cy='16' r='1.7'/><circle cx='113' cy='18' r='1.5'/></g></svg>");
+  background-repeat: repeat-x;
+  background-position: bottom center;
+  /* No negative z-index. `.hud-bar` is positioned but has `z-index: auto`, so
+     it establishes no stacking context of its own — a `z-index: -1` pseudo then
+     paints behind the nearest ancestor that does, and the ivy vanished
+     entirely. It does not need it anyway: this band sits *above* the bar and
+     overlaps no box, and a pseudo-element paints before its parent's children
+     regardless. */
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.75));
+}
+
+/* Ivy also creeping down the outer edges of the bar, which is what stops the
+   strip reading as a straight applied ribbon rather than something growing. */
+.hud-bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  /* Same reason as the band above: no negative z-index. A pseudo-element
+     already paints before its parent's children, so the boxes cover it. */
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='90' viewBox='0 0 30 90'><g fill='none' stroke='%235d6b34' stroke-width='2' stroke-linecap='round'><path d='M14 0 C 6 18, 22 34, 12 52 S 20 76, 10 90'/></g><g fill='%236f7f3e'><ellipse cx='6' cy='16' rx='5.5' ry='3' transform='rotate(-40 6 16)'/><ellipse cx='21' cy='36' rx='5' ry='2.8' transform='rotate(35 21 36)'/><ellipse cx='7' cy='60' rx='5.2' ry='2.9' transform='rotate(-32 7 60)'/><ellipse cx='18' cy='80' rx='4.4' ry='2.4' transform='rotate(28 18 80)'/></g></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='90' viewBox='0 0 30 90'><g fill='none' stroke='%235d6b34' stroke-width='2' stroke-linecap='round'><path d='M16 0 C 24 18, 8 34, 18 52 S 10 76, 20 90'/></g><g fill='%236f7f3e'><ellipse cx='24' cy='16' rx='5.5' ry='3' transform='rotate(40 24 16)'/><ellipse cx='9' cy='36' rx='5' ry='2.8' transform='rotate(-35 9 36)'/><ellipse cx='23' cy='60' rx='5.2' ry='2.9' transform='rotate(32 23 60)'/><ellipse cx='12' cy='80' rx='4.4' ry='2.4' transform='rotate(-28 12 80)'/></g></svg>");
+  background-repeat: no-repeat, no-repeat;
+  background-position: left -6px bottom, right -6px bottom;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+}
+
+/* ── Box titles on a small banner ─────────────────────────────────────────
+   "INVENTARIO" and "ÓRDENES" sat as bare text. A ruled banner underneath gives
+   them the look of a plaque nailed to the frame. */
+.box-title {
+  position: relative;
+  padding-bottom: 0.25rem;
+}
+
+.box-title::after {
+  content: '';
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(201, 162, 83, 0) 0%,
+    rgba(201, 162, 83, 0.85) 22%,
+    rgba(245, 221, 162, 0.95) 50%,
+    rgba(201, 162, 83, 0.85) 78%,
+    rgba(201, 162, 83, 0) 100%
+  );
+}
+
+/* ── Command and inventory cells: iron sockets, not web buttons ────────── */
+.command,
+.inv-slot {
+  border-color: #57452a;
+  background:
+    radial-gradient(ellipse 100% 80% at 50% 0%, rgba(140, 108, 56, 0.18), rgba(0, 0, 0, 0) 70%),
+    linear-gradient(180deg, #29221a 0%, #120e08 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(245, 221, 162, 0.12),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.6);
+}
+
+.command:hover:not(:disabled),
+.inv-slot.is-usable:hover {
+  border-color: var(--ui-gold-bright);
+  box-shadow:
+    inset 0 1px 0 rgba(245, 221, 162, 0.22),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.55),
+    0 0 8px rgba(224, 182, 74, 0.35);
+}
+
+/* ── The hero portrait gets a proper roundel frame ─────────────────────── */
+.portrait {
+  border: 1px solid #8a6d31;
+  border-radius: 3px;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.65),
+    inset 0 0 10px rgba(0, 0, 0, 0.7);
+}
+
+.portrait::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Four rivets, one per corner, as a shield boss would be pinned. */
+  background-image:
+    radial-gradient(circle at 4px 4px, #e0b64a 1.6px, rgba(0, 0, 0, 0.5) 2.1px, transparent 2.4px),
+    radial-gradient(circle at calc(100% - 4px) 4px, #e0b64a 1.6px, rgba(0, 0, 0, 0.5) 2.1px, transparent 2.4px),
+    radial-gradient(circle at 4px calc(100% - 4px), #e0b64a 1.6px, rgba(0, 0, 0, 0.5) 2.1px, transparent 2.4px),
+    radial-gradient(circle at calc(100% - 4px) calc(100% - 4px), #e0b64a 1.6px, rgba(0, 0, 0, 0.5) 2.1px, transparent 2.4px);
+}
+
+/* ── Bars in iron channels ────────────────────────────────────────────── */
+.bar {
+  border-color: #4a3c22;
+  border-radius: 1px;
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(245, 221, 162, 0.08);
+}

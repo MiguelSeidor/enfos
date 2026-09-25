@@ -1,0 +1,189 @@
+/* Pause plate and its button. Separate file: pause is a session concern that
+   outlives any one match, so it does not belong with the match HUD's styling. */
+
+.pause-button {
+  position: absolute;
+  top: 0.9rem;
+  left: 50%;
+  /* Tucked under the wave banner, which is the other always-present piece of
+     match chrome, so the two read as one cluster. */
+  transform: translate(-50%, 3.4rem);
+  z-index: 40;
+  width: 2.2rem;
+  height: 2.2rem;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  color: var(--ui-gold-bright);
+  background: linear-gradient(180deg, #2a2318, #191309);
+  border: 1px solid #8a6d31;
+  border-radius: 3px;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(245, 221, 162, 0.14),
+    0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.pause-button.is-hidden {
+  display: none;
+}
+
+.pause-button:hover {
+  border-color: var(--ui-gold-bright);
+  color: #fff;
+}
+
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  /* Takes clicks so the world underneath cannot be ordered around while the
+     simulation is frozen — a queued order that fired on resume would be a
+     ghost the player never meant to give. */
+  pointer-events: auto;
+  z-index: 70;
+  background: rgba(4, 6, 10, 0.55);
+  backdrop-filter: blur(2px);
+  transition: opacity 0.18s ease;
+}
+
+.pause-overlay.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pause-plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1.4rem 3.4rem;
+  background: rgba(10, 8, 5, 0.8);
+  border-top: 2px solid var(--ui-gold-dim);
+  border-bottom: 2px solid var(--ui-gold-dim);
+  text-align: center;
+}
+
+.pause-plate b {
+  font-family: var(--ui-display);
+  font-size: 2.6rem;
+  letter-spacing: 0.32em;
+  /* Indent matches the tracking so the word stays optically centred — letter
+     spacing adds a trailing gap after the last glyph that nothing balances. */
+  text-indent: 0.32em;
+  color: var(--ui-gold-bright);
+  text-shadow: 0 0 22px rgba(245, 221, 162, 0.35), 0 3px 10px #000;
+}
+
+.pause-plate i {
+  font-style: normal;
+  font-size: 0.85rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ui-text-dim);
+}
+
+/* Attack-move armed: the sword cursor, reusing the hover-target glyph so the
+   two states of "this click will attack" look identical — which they should,
+   because they mean the same thing. */
+body.is-attack-move,
+body.is-attack-move canvas {
+  cursor:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 32 32'><g transform='translate(32,0) scale(-1,1)' stroke='%23100c06' stroke-width='1.6' stroke-linejoin='round'><path d='M29.4 2.6 L30.2 7.4 L17.6 20 L12.4 14.8 Z' fill='%23dfe3ea'/><path d='M18.4 14.6 L20 16.2 L13.6 22.6 L12 21 Z' fill='%23aab2bd'/><path d='M7.6 12.6 L18.2 23.2 L15.4 26 L4.8 15.4 Z' fill='%23d8a83e'/><path d='M9.4 20.4 L12.6 23.6 L6.6 29.6 L3.4 26.4 Z' fill='%236b4a24'/><circle cx='4.2' cy='28.8' r='2.2' fill='%23d8a83e'/></g></svg>")
+      22 2,
+    crosshair;
+}
+
+/* Aiming a spell: a cold reticle, distinct from the sword, because this click
+   places magic rather than starting a fight. The ground circle does the rest. */
+body.is-aiming,
+body.is-aiming canvas {
+  cursor:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><g fill='none' stroke-linecap='round'><circle cx='16' cy='16' r='9' stroke='%23081018' stroke-width='3.4'/><circle cx='16' cy='16' r='9' stroke='%239fd8ff' stroke-width='1.6'/><path d='M16 2v8M16 22v8M2 16h8M22 16h8' stroke='%23081018' stroke-width='3.4'/><path d='M16 2v8M16 22v8M2 16h8M22 16h8' stroke='%23e8f6ff' stroke-width='1.6'/></g></svg>")
+      16 16,
+    crosshair;
+}
+
+/* A pulsing border, so an armed attack-move is visible even when the cursor is
+   off-screen or the player has looked away from it. */
+body.is-attack-move .ui-root::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid rgba(216, 168, 62, 0.55);
+  animation: attack-move-pulse 1s ease-in-out infinite;
+}
+
+@keyframes attack-move-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+
+/* Network plate: the pause plate's layout, with a smaller title (the text is
+   longer) and room for a progress bar and a way out. */
+.net-overlay .pause-plate b {
+  font-size: 1.9rem;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+}
+
+.net-overlay .pause-plate i {
+  text-transform: none;
+  letter-spacing: 0.06em;
+  font-size: 0.95rem;
+}
+
+.net-progress {
+  width: 16rem;
+  height: 0.4rem;
+  margin-top: 0.4rem;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--ui-gold-dim);
+}
+
+.net-progress span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--ui-gold-dim), var(--ui-gold-bright));
+  transition: width 0.15s linear;
+}
+
+.net-action {
+  margin-top: 0.8rem;
+}
+
+/* Surrender sits beside pause, one step further down the same cluster, and is
+   tinted like the danger it is so the two are never confused at a glance. */
+.surrender-button {
+  transform: translate(-50%, 3.4rem) translateX(2.6rem);
+  color: #e2a09a;
+  border-color: #7a3a32;
+}
+
+.pause-button:not(.surrender-button) {
+  transform: translate(-50%, 3.4rem) translateX(-0.4rem);
+}
+
+.surrender-button:hover {
+  border-color: #d76b5c;
+  color: #fff;
+}
+
+.pause-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.7rem;
+}
+
+.pause-actions .is-danger {
+  border-color: #7a3a32 !important;
+  color: #e2a09a !important;
+}
+
+.pause-actions .is-danger:hover {
+  border-color: #d76b5c !important;
+  color: #fff !important;
+}
