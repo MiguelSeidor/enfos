@@ -1787,8 +1787,20 @@ function setupInput(
   cancelAim: () => void,
 ): void {
   const keys = new Set<string>();
+  /**
+   * A player typing into a field is not pressing hotkeys. Without this the
+   * bindings swallow every letter that happens to be one: a four-letter room
+   * code like QFVW arrives in the lobby as "V", because Q and W are abilities
+   * and F recentres the camera, and all three call preventDefault before the
+   * character can reach the input.
+   */
+  const typing = (e: Event): boolean => {
+    const t = e.target as HTMLElement | null;
+    if (!t) return false;
+    return t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA';
+  };
   window.addEventListener('keydown', (e) => {
-    if (e.repeat) return;
+    if (e.repeat || typing(e)) return;
     const code = codeOf(e);
     keys.add(code);
     // Space pauses. It used to recentre the camera on the hero; that moved to
