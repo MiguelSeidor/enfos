@@ -77,13 +77,17 @@ export const MOOD_AMBER_STORM: MoodPreset = {
   // cannot see, so in a backlit shot — `junction` looks straight into the sun —
   // it is carrying every camera-facing face in frame on its own. At 1.5 those
   // faces were a single flat navy value; this is what gives them shape.
-  rim: { color: 0x92bcff, intensity: 2.4, elevation: 16, azimuthOffset: 172 },
-  // Key:fill lands near 9:1. Anything flatter and shadowed faces never reach the
-  // bottom decile of the histogram; anything steeper and they go dead black,
-  // which the rubric penalises just as hard as a washed-out frame.
-  // The fill sky colour is kept low-chroma on purpose: shadowed cliff faces see
-  // this light almost unopposed, so any saturation here reads multiplied.
-  fill: { sky: 0x86a4cd, ground: 0x38281c, intensity: 0.7 },
+  rim: { color: 0xa8c2ea, intensity: 2.4, elevation: 16, azimuthOffset: 172 },
+  // Key:fill lands near 8.6:1. Anything flatter and shadowed faces never reach
+  // the bottom decile of the histogram; anything steeper and they go dead
+  // black, which reads as a hole rather than as shade.
+  // The sky colour is low-chroma for a reason that is easy to underrate: a
+  // shadowed surface sees this light almost unopposed, so the fill does not
+  // tint the shadows, it *is* their colour. At 0x86a4cd, green grass under a
+  // wall came out dark teal and stopped reading as the same grass that was lit
+  // two metres away. The ground term warms for the same reason: what bounces
+  // up onto a shadowed face here is earth, not sky.
+  fill: { sky: 0x9aa8ba, ground: 0x453524, intensity: 0.95 },
   // Raised from 0.2. This is the pipeline's only source of specular that is not
   // a single directional lobe, so at 0.2 a metal surface had almost nothing to
   // reflect and read as flat paint. The v0 failure this number was set low to
@@ -99,10 +103,10 @@ export const MOOD_AMBER_STORM: MoodPreset = {
     // are the low ground, so height falloff concentrates haze exactly where the
     // frame's darkest pixels live); 0.011 keeps the far rim separation without
     // lifting the ravine floor off the black point.
-    density: 0.011,
-    heightFalloff: 26,
-    baseHeight: -12,
-    startDistance: 20,
+    density: 0.0135,
+    heightFalloff: 30,
+    baseHeight: -6,
+    startDistance: 28,
     hazeAway: 0x54687f,
     hazeSun: 0xffc386,
     sunAnisotropy: 5,
@@ -120,19 +124,19 @@ export const MOOD_AMBER_STORM: MoodPreset = {
     // Pulled back from 2.75 to pay for the brighter key and the higher sun.
     // Exposure sets where the *midtones* land; the top of the range is bought by
     // the shoulder below, which is why this can come down while highlights go up.
-    exposure: 1.95,
+    exposure: 1.64,
     // Raised with exposure lowered to match. This pair is the one that widens
     // both tails at once: the power curve is pivoted on 18% grey, so a steeper
     // exponent pushes everything under the pivot down and everything over it up
     // while the pivot itself does not move. Exposure alone can only slide the
     // whole histogram, which trades one end of the rubric for the other.
-    sceneContrast: 1.42,
-    sceneSaturation: 1.02,
+    sceneContrast: 1.46,
+    sceneSaturation: 0.98,
     whiteBalance: [1.04, 1.0, 0.96],
     // Returns separation to the shadow mass the contrast curve collapses. See
     // the long note in effects/grade.ts — it multiplies, so black stays black.
-    toeAmount: 0.15,
-    toeRange: 0.05,
+    toeAmount: 0.28,
+    toeRange: 0.06,
     // The frame's only source of real highlights. Everything below the knee is
     // untouched, so this buys top-end range without moving the midtones or the
     // mean. Sits after bloom so the 1.05 threshold structures.ts is tuned
@@ -140,24 +144,24 @@ export const MOOD_AMBER_STORM: MoodPreset = {
     // The knee is in post-exposure scene-linear units, so it has to track
     // exposure: when exposure came down from 2.75 to 2.05 a fixed knee stopped
     // catching the same surfaces and the highlights went with it.
-    shoulder: { knee: 0.36, width: 0.75, gain: 2.6, rolloff: 1.6 },
+    shoulder: { knee: 0.28, width: 0.85, gain: 1.9, rolloff: 1.9 },
     // The previous lift of -0.022/-0.017/-0.008 was a per-channel black clip:
     // with gain applied first it drove red to zero below 0.021 and green below
     // 0.017 while blue survived to 0.008, so every cool shadow lost two channels
     // before it lost the third and the shadow mass went to a flat hue with no
     // detail in it. Shallower, and closer to matched across channels, keeps a
     // true black without eating the last stop above it.
-    lift: [-0.017, -0.015, -0.011],
+    lift: [-0.009, -0.008, -0.005],
     gamma: [1.0, 1.0, 1.0],
     gain: [1.06, 1.03, 1.0],
-    shadowTint: [-0.035, 0.0, 0.07],
-    highlightTint: [0.04, 0.015, -0.035],
+    shadowTint: [-0.028, 0.004, 0.052],
+    highlightTint: [0.05, 0.02, -0.045],
     toneBalance: 0.55,
     shadowRange: 0.34,
-    saturation: 1.04,
+    saturation: 0.98,
     // Firms both ends: keeps the toe anchored under the exposure lift and
     // pushes lit stone caps over the 90% line the rubric requires.
-    sCurve: 0.45,
+    sCurve: 0.38,
   },
 };
 

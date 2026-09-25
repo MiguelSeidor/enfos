@@ -226,7 +226,7 @@ export function createGroundMaterial(
     // Cooled from (1.06, 1.0, 0.88). That warm cast suited the old compacted
     // dirt trail; over the paved recipe it turned grey granite into sandstone
     // and the road blended back into the ground it is meant to stand out from.
-    shader.uniforms.uTint3 = { value: new THREE.Color(0.92, 0.95, 1.0) };
+    shader.uniforms.uTint3 = { value: new THREE.Color(0.95, 0.95, 0.97) };
     shader.uniforms.uDetailScale = { value: 0.62 };
     shader.uniforms.uWaterLevel = { value: WATER_LEVEL };
 

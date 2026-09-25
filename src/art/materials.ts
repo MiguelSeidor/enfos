@@ -125,16 +125,20 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     // and darkening them again would undo that fix — the range has to come from
     // the light end.
     ramp: [
-      { stop: 0.0, color: 0x363c25 },
-      { stop: 0.3, color: 0x4a5636 },
-      { stop: 0.6, color: 0x647146 },
-      { stop: 0.84, color: 0x7d8b58 },
-      { stop: 1.0, color: 0x97a76b },
+      { stop: 0.0, color: 0x2f3c22 },
+      { stop: 0.3, color: 0x415635 },
+      { stop: 0.6, color: 0x567142 },
+      { stop: 0.84, color: 0x62814a },
+      { stop: 1.0, color: 0x739757 },
     ],
     layers: [
-      // Turf density drift at ~0.8 m. Low amplitude on purpose: this is value
-      // variation, not structure. The v2 recipe gave its f5 (1.8 m) term half
-      // the range, which is precisely the "large-scale mottled blur" defect.
+      // Turf density drift at ~0.8 m, and the layer that now owns most of the
+      // field's range. Value variation at this scale is what a real field has:
+      // drier here, lusher there, over metres. It was held at 0.34 to avoid the
+      // "large-scale mottled blur" the v2 recipe had, but the blur came from
+      // that recipe putting half its range into an f5 (1.8 m) term with no tuft
+      // structure inside it. At 0.8 m with three tuft scales modulating on top,
+      // the drift reads as the field, not as a blur over it.
       { kind: 'clumps', frequency: 11, amplitude: 0.34, octaves: 3, width: 0.26, warp: 0.07 },
       // Three tuft scales, each grown through its OWN low-frequency density
       // field. The v3 recipe had two tuft layers at uniform density across the
@@ -202,7 +206,7 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
       {
         color: 0x7a7355,
         mask: { from: 'noise', noise: { frequency: 6, octaves: 3, warp: 0.06 }, low: 0.56, high: 0.86 },
-        strength: 0.45,
+        strength: 0.34,
         roughness: 0.95,
       },
       // Dry tips on tuft crowns. Pulled back from 0.34: with every crown lit to
@@ -236,12 +240,12 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     normalStrength: 2.0,
     aoStrength: 1.05,
     bakedCavity: 0.28,
-    // Raised from 1.18. Widening the ramp alone only got grass from 26 to 40
-    // luma levels of range because the *field* feeding it is clustered near the
-    // middle: the tuft layers are additive at amplitude 0.5–0.9 over a mid base,
-    // where the paved lane's brick layer swings nearly full range. Stretching
-    // the composited field is what lets the ramp's new width actually be used.
-    contrast: 1.95,
+    // 1.95 -> 1.5. The higher value was chosen to force the ramp's full width
+    // to be used, and it worked, but the layer that used it was the tufts: a
+    // stretch applied to a field the tufts already dominate only drives their
+    // crowns further into the top stop. With the range now spent on the clumps,
+    // 1.5 is enough to reach both ends of the ramp at the scale that should.
+    contrast: 1.35,
     detail: detail({
       scale: 6,
       layers: [
@@ -504,10 +508,10 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     // lane is the map's one piece of infrastructure and it should look laid,
     // not trodden.
     ramp: [
-      { stop: 0.0, color: 0x38393d },
-      { stop: 0.42, color: 0x5b5d61 },
-      { stop: 0.76, color: 0x7c7e81 },
-      { stop: 1.0, color: 0x9a9b9c },
+      { stop: 0.0, color: 0x2f3034 },
+      { stop: 0.42, color: 0x4b4d51 },
+      { stop: 0.76, color: 0x66686c },
+      { stop: 1.0, color: 0x7e8082 },
     ],
     layers: [
       // Flagstone courses. `rows`/`cols` chosen against the layer's 8.5 m tile
