@@ -1,6 +1,7 @@
 /** Allocation-free math helpers for the simulation hot path. */
 
 import type { Vec2 } from './contracts';
+import { atan2, exp, log2, pow } from './detmath';
 
 export const TAU = Math.PI * 2;
 export const DEG = Math.PI / 180;
@@ -27,7 +28,7 @@ export const smootherstep = (t: number): number => {
 
 /** Frame-rate independent exponential smoothing. `rate` in units per second. */
 export const damp = (a: number, b: number, rate: number, dt: number): number =>
-  b + (a - b) * Math.exp(-rate * dt);
+  b + (a - b) * exp(-rate * dt);
 
 export const dist2 = (a: Vec2, b: Vec2): number => {
   const dx = a.x - b.x;
@@ -38,7 +39,7 @@ export const dist2 = (a: Vec2, b: Vec2): number => {
 export const dist = (a: Vec2, b: Vec2): number => Math.sqrt(dist2(a, b));
 
 export const angleTo = (from: Vec2, to: Vec2): number =>
-  Math.atan2(to.x - from.x, to.z - from.z);
+  atan2(to.x - from.x, to.z - from.z);
 
 /** Shortest signed delta between two angles, in (-PI, PI]. */
 export const angleDelta = (from: number, to: number): number => {
@@ -58,7 +59,7 @@ export const rotateToward = (current: number, target: number, maxStep: number): 
  * Returns 0..softCap asymptotically; `value` may grow without bound (GDD §9).
  */
 export const softCap = (value: number, cap: number, k = 1): number =>
-  cap * (1 - Math.exp((-k * value) / cap));
+  cap * (1 - exp((-k * value) / cap));
 
 /**
  * Armor mitigation. Never reaches 100%, stays finite for arbitrarily large armor.
@@ -74,7 +75,7 @@ export const armorMitigation = (armor: number, constant = 100): number => {
  * forever without overflowing or trivialising content.
  */
 export const levelScale = (level: number, base: number, exponent = 1.06): number =>
-  base * Math.pow(exponent, Math.log2(level + 1) * Math.sqrt(level));
+  base * pow(exponent, log2(level + 1) * Math.sqrt(level));
 
 /** Numeric guard used by balance tests; catches NaN/Infinity leaking into stats. */
 export const isFiniteNumber = (v: number): boolean =>

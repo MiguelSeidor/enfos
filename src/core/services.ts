@@ -59,6 +59,12 @@ export interface DamageRequest {
   amount: number;
   type: DamageType;
   canCrit?: boolean;
+  /**
+   * A crit the caller already rolled and folded into `amount`. The auto-attack
+   * rolls its own; without passing it through, every one of those crits reached
+   * the HUD and the mixer as an ordinary hit.
+   */
+  crit?: boolean;
   /** Skips armor and resistances; use sparingly. */
   trueDamage?: boolean;
   abilityId?: DefId;
@@ -172,6 +178,12 @@ export interface TerrainService {
   /** Surface normal, for aligning decals and footstep effects. */
   normalAt(x: number, z: number, out: THREE.Vector3): THREE.Vector3;
   isWalkable(x: number, z: number): boolean;
+  /**
+   * Height of the solid cover standing at a point — a rock, a pillar — as an
+   * absolute world height, or 0 where there is none. Line of sight tests it;
+   * movement does not, because props are cover, not walls.
+   */
+  blockerTop(x: number, z: number): number;
   /** Ordered lane waypoints from spawn to core for a given team and lane. */
   lanePath(team: TeamId, lane: number): Vec2[];
   readonly bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
@@ -197,6 +209,30 @@ export interface VfxService {
   decal(id: DefId, pos: Vec2, size: number, life: number): void;
   damageNumber(pos: Vec2, amount: number, crit: boolean, type: DamageType): void;
   shake(intensity: number, duration: number): void;
+  /**
+   * Fires a purely visual projectile along `from → to`. Appended by VFX.
+   *
+   * It carries no damage and cannot miss: gameplay resolves the shot itself and
+   * calls this to make the flight visible. `vfxId` selects the look —
+   * `shot.spine`, `shot.hex`, `shot.arcane`, `shot.frost`, `shot.holy` — and the
+   * impact effect fires where it lands. For the timing to read correctly, call
+   * this when the attacker swings and apply the damage after
+   * `distance / speed` seconds.
+   */
+  projectile(
+    vfxId: DefId,
+    from: Vec2,
+    to: Vec2,
+    opts?: {
+      speed?: number;
+      /** Height above the ground at both ends. */
+      height?: number;
+      /** Overrides `height` at the launch end — a meteor starts in the sky. */
+      fromHeight?: number;
+      /** Overrides `height` at the landing end. */
+      toHeight?: number;
+    },
+  ): void;
 }
 
 export const VfxKey = serviceKey<VfxService>('vfx');

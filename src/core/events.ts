@@ -11,12 +11,19 @@ export interface GameEvents {
   'match:end': { winner: TeamId | null };
   'match:phase': { phase: string; previous: string };
 
-  'wave:announce': { wave: number; modifiers: DefId[]; isBoss: boolean };
+  'wave:announce': { wave: number; modifiers: DefId[]; isBoss: boolean; sudden: boolean };
   'wave:start': { wave: number; enemyCount: number };
-  'wave:clear': { wave: number; duration: number };
+  /** One team emptied its side of this wave. The other may still be fighting. */
+  'wave:clear': { wave: number; duration: number; team: TeamId };
 
   'unit:spawn': { id: EntityId; defId: DefId; pos: Vec2 };
   'unit:death': { id: EntityId; killerId: EntityId | null; pos: Vec2 };
+  /**
+   * A kill that paid out, with the corpse's position so the HUD can float the
+   * reward over the body. Separate from `economy:gold`, which fires once per
+   * hero when a creep dies unclaimed and carries no position.
+   */
+  'unit:bounty': { pos: Vec2; gold: number; xp: number; heroIds: EntityId[] };
   'unit:damage': {
     targetId: EntityId;
     sourceId: EntityId | null;
@@ -25,16 +32,23 @@ export interface GameEvents {
     type: DamageType;
     crit: boolean;
     pos: Vec2;
+    /** The ability that dealt it, or null for an auto-attack. */
+    abilityId: DefId | null;
   };
   'unit:heal': { targetId: EntityId; sourceId: EntityId | null; amount: number; pos: Vec2 };
+  /** A physical attack was dodged. Carries no amount — nothing landed. */
+  'unit:miss': { targetId: EntityId; sourceId: EntityId | null; pos: Vec2 };
   'unit:status': { targetId: EntityId; statusId: DefId; applied: boolean; stacks: number };
-
   'hero:levelUp': { id: EntityId; level: Level; milestone: boolean };
   'hero:xp': { id: EntityId; amount: number; total: number };
   'hero:abilityCast': { id: EntityId; abilityId: DefId; target: Vec2 | EntityId | null };
   'hero:abilityReady': { id: EntityId; abilityId: DefId };
   'hero:talentPicked': { id: EntityId; talentId: DefId; rank: number };
   'hero:itemBought': { id: EntityId; itemId: DefId; cost: number };
+  /** A consumable was drunk from the inventory. */
+  'hero:itemUsed': { id: EntityId; itemId: DefId };
+  /** A fallen hero stood back up at the Core. */
+  'hero:revive': { id: EntityId; pos: Vec2 };
 
   'economy:gold': { heroId: EntityId; delta: number; total: number; reason: string };
   'economy:influence': { heroId: EntityId; delta: number; total: number; reason: string };
@@ -45,14 +59,26 @@ export interface GameEvents {
   'core:leak': { team: TeamId; livesLeft: number; enemyDefId: DefId };
   'core:destroyed': { team: TeamId };
 
-  'boss:phase': { id: EntityId; phase: number; healthFraction: number };
+  /** A boss crossed a health threshold and entered a new stage. `phase` is 1-based. */
+  'boss:phase': { id: EntityId; phase: number; healthFraction: number; announce: string };
   'boss:telegraph': { id: EntityId; abilityId: DefId; pos: Vec2; leadTime: number };
 
   'vfx:request': { vfxId: DefId; pos: Vec2; scale?: number; rotation?: number };
   'sfx:request': { sfxId: DefId; pos?: Vec2; volume?: number };
-  'camera:shake': { intensity: number; duration: number };
+  /** `team`, when set, limits the shake to that team's players. */
+  'camera:shake': { intensity: number; duration: number; team?: TeamId };
 
-  'ui:notify': { text: string; severity: 'info' | 'warn' | 'danger' | 'reward' };
+  /**
+   * A message for the player. With several players in one simulation most
+   * messages concern one of them: `heroId` addresses a hero's owner, `team` a
+   * whole team. Neither set means everyone.
+   */
+  'ui:notify': {
+    text: string;
+    severity: 'info' | 'warn' | 'danger' | 'reward';
+    heroId?: EntityId;
+    team?: TeamId;
+  };
   'debug:log': { channel: string; message: string; data?: unknown };
 }
 

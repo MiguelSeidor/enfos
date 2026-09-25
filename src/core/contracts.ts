@@ -510,6 +510,18 @@ export interface GameModule {
   /** Presentation step. Variable dt. Never mutates simulation state. */
   update?(dt: number, ctx: GameContext): void;
   dispose?(): void;
+  /**
+   * Snapshot support. `saveState` returns this module's simulation state as
+   * structured-cloneable data (no functions, no render objects); `loadState`
+   * adopts a copy of it. Every piece of state that can change what a future
+   * tick computes must be in here — anything left out desyncs a restored match.
+   * The engine clones the whole snapshot as one graph, so objects shared
+   * between modules keep their identity.
+   */
+  saveState?(): unknown;
+  /** Called on every module before any `loadState`, while the old match is still in place. */
+  beforeRestore?(): void;
+  loadState?(state: unknown): void;
 }
 
 export interface ServiceLocator {

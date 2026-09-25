@@ -17,9 +17,22 @@ import type {
   MatchState,
   ServiceKey,
   ServiceLocator,
+  UnitState,
 } from './contracts';
 import { EventBus, type GameEvents } from './events';
 import { createRng, type Rng } from './rng';
+
+/** Bumped whenever snapshot contents change shape; older snapshots are ignored. */
+export const SNAPSHOT_VERSION = 1;
+
+export interface SimSnapshot {
+  version: number;
+  tick: number;
+  time: number;
+  rng: number;
+  match: Pick<MatchState, 'seed' | 'wave' | 'phase' | 'mode' | 'cores' | 'units' | 'heroes' | 'winner'>;
+  modules: Record<string, unknown>;
+}
 
 export const SIM_HZ = 30;
 export const SIM_STEP = 1 / SIM_HZ;
@@ -90,6 +103,7 @@ export class Engine {
   private fpsAccum = 0;
   private fpsFrames = 0;
   private paused = false;
+  private stepLimit = Infinity;
   /** Debug/QA: run the simulation faster or slower without touching render. */
   timeScale = 1;
 
@@ -117,6 +131,19 @@ export class Engine {
 
   getModule<T extends GameModule>(id: string): T | undefined {
     return this.modules.find((m) => m.id === id) as T | undefined;
+  }
+
+  /**
+   * Adds a module to an already-running engine and initialises it immediately.
+   *
+   * Used for subsystems that cannot exist until the player has made a choice —
+   * gameplay needs a hero before it can spawn one. Such a module may only depend
+   * on services that already exist, since the boot-order guarantee no longer
+   * applies to it.
+   */
+  async addAndInit(module: GameModule): Promise<void> {
+    this.add(module);
+    await module.init(this.ctx);
   }
 
   async initAll(onProgress?: (done: number, total: number, id: string) => void): Promise<void> {
@@ -149,6 +176,37 @@ export class Engine {
     this.paused = paused;
   }
 
+  /**
+   * Puts the simulation back at tick 0 with a fresh seed.
+   *
+   * The engine runs from boot — behind the title screen, through hero select —
+   * so by the time a match starts each machine has counted a different number
+   * of ticks and drawn nothing from the RNG in a different state. Online, every
+   * machine must start the match from the same tick and the same RNG, so the
+   * match resets both before its modules initialise.
+   */
+  resetSimulation(seed: number): void {
+    this.clock.tick = 0;
+    this.clock.time = 0;
+    this.accumulator = 0;
+    this.rng.restore((seed | 0) === 0 ? 0x9e3779b9 : seed | 0);
+    this.opts.match.seed = seed;
+    this.opts.match.tick = 0;
+    this.opts.match.time = 0;
+  }
+
+  /**
+   * The last tick the simulation may reach. Online, a tick can only be
+   * simulated once every player's commands for it are known; the network
+   * session raises this as turns arrive. Infinity for solo play.
+   */
+  setStepLimit(tick: number): void {
+    this.stepLimit = tick;
+  }
+
+  /** Called after every simulated tick, with that tick. For checksums. */
+  onStep: ((tick: number) => void) | null = null;
+
   get isPaused(): boolean {
     return this.paused;
   }
@@ -157,6 +215,103 @@ export class Engine {
   stepHeadless(steps: number): void {
     for (let i = 0; i < steps; i++) {
       this.simulateStep();
+    }
+  }
+
+  /**
+   * Simulates every tick up to the step limit right away, returning how many.
+   * A hidden tab gets no animation frames at all, so the network session calls
+   * this from a timer to keep an online match from piling up unplayed turns.
+   */
+  drainToLimit(maxSteps = 900): number {
+    let steps = 0;
+    while (this.clock.tick < this.stepLimit && steps < maxSteps) {
+      this.simulateStep();
+      steps++;
+    }
+    return steps;
+  }
+
+  /** The current simulation tick. */
+  get tick(): number {
+    return this.clock.tick;
+  }
+
+  /**
+   * A deep copy of the whole simulation: clock, RNG, match state and every
+   * module's `saveState`. Built as one object and cloned in one pass, so an
+   * object referenced from two places — a hero in both unit tables, a timed
+   * modifier both on its unit and in the ability module's expiry list — is
+   * still one object in the copy.
+   */
+  snapshot(): SimSnapshot {
+    const match = this.opts.match;
+    // Render handles are presentation (and hold GPU objects that cannot be
+    // cloned); detach them for the duration of the copy.
+    const handles: [UnitState, unknown][] = [];
+    for (const unit of match.units.values()) {
+      if (unit.renderRef === undefined) continue;
+      handles.push([unit, unit.renderRef]);
+      unit.renderRef = undefined;
+    }
+    try {
+      const modules: Record<string, unknown> = {};
+      for (const module of this.modules) {
+        if (module.saveState) modules[module.id] = module.saveState();
+      }
+      return structuredClone({
+        version: SNAPSHOT_VERSION,
+        tick: this.clock.tick,
+        time: this.clock.time,
+        rng: this.rng.state(),
+        match: {
+          seed: match.seed,
+          wave: match.wave,
+          phase: match.phase,
+          mode: match.mode,
+          cores: match.cores,
+          units: match.units,
+          heroes: match.heroes,
+          winner: match.winner,
+        },
+        modules,
+      });
+    } finally {
+      for (const [unit, handle] of handles) unit.renderRef = handle;
+    }
+  }
+
+  /**
+   * Replaces the running simulation with a snapshot. The snapshot is adopted,
+   * not copied: pass a fresh one (from `snapshot()` or from storage).
+   */
+  restore(snapshot: SimSnapshot): void {
+    for (const module of this.modules) module.beforeRestore?.();
+
+    this.clock.tick = snapshot.tick;
+    this.clock.time = snapshot.time;
+    this.accumulator = 0;
+    this.rng.restore(snapshot.rng);
+    const match = this.opts.match;
+    const m = snapshot.match;
+    match.seed = m.seed;
+    match.tick = snapshot.tick;
+    match.time = snapshot.time;
+    match.wave = m.wave;
+    match.phase = m.phase;
+    match.mode = m.mode;
+    match.cores = m.cores;
+    match.winner = m.winner;
+    // Refilled rather than reassigned: modules and presentation hold these Maps.
+    match.units.clear();
+    for (const [id, unit] of m.units) match.units.set(id, unit);
+    match.heroes.clear();
+    for (const [id, hero] of m.heroes) match.heroes.set(id, hero);
+
+    for (const module of this.modules) {
+      if (module.loadState && snapshot.modules[module.id] !== undefined) {
+        module.loadState(snapshot.modules[module.id]);
+      }
     }
   }
 
@@ -176,16 +331,34 @@ export class Engine {
     }
 
     if (this.paused) dt = 0;
-    this.accumulator += dt * this.timeScale;
+
+    // Online pacing. `behind` is how many ticks are already confirmed and
+    // waiting. A small backlog is normal network jitter; a large one means this
+    // machine fell behind (a slow frame, a hidden tab) and has to catch up, so
+    // it runs slightly fast, and much faster when far behind.
+    //
+    // Only online: solo play has no limit, and `Infinity - tick` read as being
+    // infinitely far behind — which ran every solo match at four times speed.
+    const behind = Number.isFinite(this.stepLimit) ? this.stepLimit - this.clock.tick : 0;
+    const catchUp = behind > 30 ? 4 : behind > 6 ? 1.25 : 1;
+    const maxSteps = behind > 30 ? MAX_STEPS_PER_FRAME * 4 : MAX_STEPS_PER_FRAME;
+    this.accumulator += dt * this.timeScale * catchUp;
 
     const simStart = performance.now();
     let steps = 0;
-    while (this.accumulator >= SIM_STEP && steps < MAX_STEPS_PER_FRAME) {
+    while (
+      this.accumulator >= SIM_STEP &&
+      steps < maxSteps &&
+      this.clock.tick < this.stepLimit
+    ) {
       this.simulateStep();
       this.accumulator -= SIM_STEP;
       steps++;
     }
-    if (steps === MAX_STEPS_PER_FRAME) this.accumulator = 0;
+    if (steps === maxSteps) this.accumulator = 0;
+    // Waiting on the network: do not bank the waited time, or the next turn
+    // would be played back as a burst to "catch up" on time that was never owed.
+    if (this.clock.tick >= this.stepLimit) this.accumulator = Math.min(this.accumulator, SIM_STEP);
     this.stats.simMs = performance.now() - simStart;
     this.stats.steps = steps;
 
@@ -214,6 +387,7 @@ export class Engine {
     for (let i = 0; i < this.modules.length; i++) {
       this.modules[i]!.fixedUpdate?.(SIM_STEP, this.ctx);
     }
+    this.onStep?.(this.clock.tick);
   }
 
   dispose(): void {
