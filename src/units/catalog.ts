@@ -263,7 +263,7 @@ function cape(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BULWARK_PALETTE: Palette = {
-  primary: 0x6e7d90,
+  primary: 0x5c6a7c,
   secondary: 0x7a1f28,
   accent: 0xc08a2e,
   emissive: 0xffb347,
@@ -777,7 +777,474 @@ const oracle: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. Ruin Cleaver — melee creep
+// 3. Talon of the Silent Grove — ranged marksman hero
+//
+// Reads as a vertical line broken by one shape: the tall recurve bow held at
+// her side. Everything else is kept tight — hood, short cloak, no pauldron on
+// the draw arm — so the bow is the only thing the silhouette says.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TALON_PALETTE: Palette = {
+  primary: 0x2f4a33,
+  secondary: 0x6b4a2c,
+  accent: 0xc9b06a,
+  emissive: 0x8ff0a8,
+};
+
+const talon: CharacterDef = {
+  id: 'hero.talon',
+  name: 'Talon of the Silent Grove',
+  kind: 'hero',
+  archetype: 'Marksman',
+  proportions: prop({
+    height: 2.66,
+    legFraction: 0.5,
+    hipHalfWidth: 0.15,
+    shoulderHalfWidth: 0.26,
+    torsoFraction: 0.28,
+    neckLength: 0.06,
+    headSize: 0.21,
+    armFraction: 0.47,
+    stoop: -0.02,
+    capeSegments: 3,
+    footLength: 0.26,
+  }),
+  profile: profile({
+    idlePeriod: 3.6,
+    breath: 0.9,
+    stanceWidth: 1,
+    crouch: 0.3,
+    armSplay: 0.16,
+    walkSpeed: 3.6,
+    runSpeed: 7.2,
+    stride: 1.2,
+    stanceFraction: 0.54,
+    bob: 0.045,
+    lean: 0.16,
+    armSwing: 0.5,
+    footLift: 0.2,
+    attackDuration: 0.75,
+    attackStyle: 'shoot',
+    castDuration: 1.2,
+    castStyle: 'hurl',
+    weight: 0.3,
+    mainHand: 'R',
+    capeSegments: 3,
+  }),
+  slots: {
+    armor: slot('unit.steel', { tint: 'accent', roughness: 0.45, metalness: 0.9 }),
+    cloth: slot('unit.cloth', { tint: 'primary', metalness: 0 }),
+    leather: slot('unit.leather', { tint: 'secondary', metalness: 0 }),
+    metal: slot('structure.gold', { tint: 'accent', roughness: 0.34, metalness: 1 }),
+    flesh: slot('unit.skin', { tint: 'none', metalness: 0 }),
+    glow: slot('unit.bone', { tint: 'none', metalness: 0, emissiveIntensity: 3.6 }),
+  },
+  palette: TALON_PALETTE,
+  visual: visual('hero.talon', 'narrow-hood-vertical-longbow', TALON_PALETTE, 1, ['leather', 'cloth', 'gold']),
+  build(b, rig) {
+    const p = rig.proportions;
+    addBody(b, rig, {
+      torsoSlot: 'leather',
+      limbSlot: 'cloth',
+      handSlot: 'leather',
+      headSlot: 'flesh',
+      bootSlot: 'leather',
+      round: 4.4,
+      chestScale: 0.94,
+      waistScale: 0.84,
+      armScale: 0.92,
+      legScale: 1,
+      handScale: 1,
+      bootScale: 1.1,
+      depthRatio: 0.62,
+      head: true,
+    });
+
+    const chest = rw(rig, B.chest);
+    const pelvis = rw(rig, B.pelvis);
+    const head = rw(rig, B.head);
+
+    // ── Hood: a cone that swallows the skull and points back, so the head
+    // reads as a beak from any angle. Open at the front, where the face is.
+    b.add(
+      loft(
+        [
+          { y: head[1] - p.headSize * 1.15, w: p.headSize * 0.98, d: p.headSize * 1.05, round: 5 },
+          { y: head[1] - p.headSize * 0.2, w: p.headSize * 0.92, d: p.headSize * 1.02, round: 5 },
+          { y: head[1] + p.headSize * 0.62, w: p.headSize * 0.5, d: p.headSize * 0.66, round: 4 },
+          { y: head[1] + p.headSize * 0.95, w: p.headSize * 0.12, d: p.headSize * 0.3, round: 3 },
+        ],
+        { segments: 12, smoothAngle: 44 },
+      ),
+      {
+        slot: 'cloth',
+        bind: { bones: [B.head, B.neck], falloff: p.headSize * 0.8, bias: 1.2 },
+        uvScale: 1.3,
+      },
+    );
+    // Brim, angled down over the eyes.
+    b.add(plate({ width: p.headSize * 1.05, height: p.headSize * 0.46, thickness: 0.02, bow: 0.32, topScale: 1, bottomScale: 0.72, droop: 0.2 }), {
+      slot: 'cloth',
+      bone: B.head,
+      at: [0, p.headSize * 0.26, p.headSize * 0.62],
+      rot: [1.15, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1.1,
+    });
+
+    // ── Short cloak, cut away at the front: it must never cross the bow arm.
+    cape(b, rig, { slot: 'cloth', width: 0.48, length: 0.8, flare: 0.55, z: -0.05, thickness: 0.012 });
+
+    // ── Chest harness: two straps crossing, one gem where they meet.
+    for (const sz of [-1, 1]) {
+      b.add(plate({ width: 0.075, height: 0.52, thickness: 0.016, bow: 0.28, topScale: 0.9, bottomScale: 0.9 }), {
+        slot: 'leather',
+        at: [sz * 0.05, chest[1] - 0.08, p.shoulderHalfWidth * 0.52],
+        rot: [0.06, 0, sz * 0.42],
+        bind: { bones: [B.chest, B.spine], falloff: 0.3, bias: 1.1 },
+        uvScale: 1.2,
+      });
+    }
+    b.add(gem(0.042, 0), {
+      slot: 'glow',
+      at: [0, chest[1] - 0.06, p.shoulderHalfWidth * 0.6],
+      bind: { bones: [B.chest], rigid: true },
+      uvScale: 1,
+    });
+
+    // ── Bracers: the draw arm gets the heavier one, which is the arm the
+    // player watches during the shoot clip.
+    for (const side of ['L', 'R'] as const) {
+      b.add(
+        loft(
+          [
+            { y: 0, w: 0.075, d: 0.075, round: 5 },
+            { y: 0.1, w: 0.085, d: 0.085, round: 5 },
+            { y: 0.26, w: 0.07, d: 0.07, round: 5 },
+          ],
+          { segments: 8, smoothAngle: 40 },
+        ),
+        {
+          slot: side === 'R' ? 'armor' : 'leather',
+          bone: `elbow.${side}`,
+          at: [0, -0.16, 0],
+          bind: { bones: [`elbow.${side}`, `wrist.${side}`], rigid: true },
+          uvScale: 1.2,
+        },
+      );
+    }
+    // One light shoulder cap, on the bow arm only: asymmetry at the top.
+    pauldron(b, rig, 'L', { size: 0.12, slot: 'armor', lames: 1, tiltOut: 0.26 });
+
+    // ── Quiver slung across the back, arrows fanning over the right shoulder.
+    b.add(prism({ h: 0.52, w0: 0.075, d0: 0.075, w1: 0.09, d1: 0.09, round: 7, segments: 8 }), {
+      slot: 'leather',
+      at: [0.13, chest[1] - 0.16, -p.shoulderHalfWidth * 0.62],
+      rot: [-0.22, 0, -0.34],
+      bind: { bones: [B.chest], rigid: true },
+      uvScale: 1.2,
+    });
+    spikeRow(b, rig, {
+      bone: B.chest,
+      count: 5,
+      from: [0.06, chest[1] + 0.16, -p.shoulderHalfWidth * 0.66],
+      to: [0.26, chest[1] + 0.2, -p.shoulderHalfWidth * 0.5],
+      length: 0.42,
+      baseW: 0.022,
+      slot: 'metal',
+      curve: 0,
+      tilt: -0.3,
+      bind: [B.chest],
+    });
+
+    // ── The longbow: held upright in the left hand. Vertical where the
+    // spinebolt's is horizontal, so the two ranged silhouettes never trade.
+    const span = 1.95;
+    b.add(
+      shell({
+        nu: 5,
+        nv: 18,
+        surface: (u, v, out) => {
+          const k = (v - 0.5) * 2;
+          const w = 0.05 * (1 - 0.7 * Math.abs(k));
+          // Recurve: the limbs sweep forward, then flick back at the tips.
+          const sweep = 0.26 * (1 - k * k) - 0.22 * Math.pow(Math.abs(k), 5);
+          out.set((u - 0.5) * w * 2, k * span * 0.5, sweep);
+        },
+        thickness: (_u, v) => 0.03 * (1 - 0.55 * Math.abs((v - 0.5) * 2)) + 0.006,
+        uvScale: 2.6,
+        smoothAngle: 44,
+      }),
+      {
+        slot: 'metal',
+        bone: 'hand.L',
+        at: [0.04, 0.02, 0.1],
+        rot: [0.12, 0, 0.08],
+        bind: { bones: ['hand.L'], rigid: true },
+        uvScale: 1,
+      },
+    );
+    // String: a thin taut line between the tips, and a leather grip.
+    b.add(prism({ h: span * 0.98, w0: 0.008, d0: 0.008, w1: 0.008, d1: 0.008, round: 3, segments: 2 }), {
+      slot: 'glow',
+      bone: 'hand.L',
+      at: [0.04, 0.02, 0.1 - 0.14],
+      rot: [0.12, 0, 0.08],
+      bind: { bones: ['hand.L'], rigid: true },
+      uvScale: 1,
+    });
+    b.add(prism({ h: 0.2, w0: 0.045, d0: 0.06, w1: 0.045, d1: 0.06, round: 5, segments: 6 }), {
+      slot: 'leather',
+      bone: 'hand.L',
+      at: [0.04, 0.02, 0.1],
+      rot: [0.12, 0, 0.08],
+      bind: { bones: ['hand.L'], rigid: true },
+      uvScale: 1,
+    });
+
+    // ── A single nocked arrow, so the hero reads as ready rather than idle.
+    b.add(spike({ length: 0.6, baseW: 0.018, curve: 0, taper: 2.4, segments: 6 }), {
+      slot: 'metal',
+      bone: 'hand.L',
+      at: [0.04, 0.02, 0.02],
+      rot: [Math.PI / 2 + 0.12, 0, 0.08],
+      bind: { bones: ['hand.L'], rigid: true },
+      uvScale: 0.7,
+    });
+
+    // Hip pouch, to break the long vertical of the legs.
+    b.add(loft(
+      [
+        { y: 0, w: 0.09, d: 0.07, round: 5 },
+        { y: 0.12, w: 0.11, d: 0.085, round: 5 },
+        { y: 0.2, w: 0.08, d: 0.06, round: 5 },
+      ],
+      { segments: 8, smoothAngle: 42 },
+    ), {
+      slot: 'leather',
+      at: [-p.hipHalfWidth * 1.25, pelvis[1] - 0.06, 0.02],
+      rot: [0, 0, -0.16],
+      bind: { bones: [B.pelvis], rigid: true },
+      uvScale: 1.2,
+    });
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Vesper of the First Light — healer hero
+//
+// A bell: wide robe, no legs to read, and two things above the waist that
+// nothing else in the cast has — a ring of light floating over the head and a
+// lantern swinging from a crook. Where the Oracle is a tall cone that ends in a
+// point, Vesper is a cone that ends in a halo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VESPER_PALETTE: Palette = {
+  primary: 0xd6cdb8,
+  secondary: 0x7c5a2e,
+  accent: 0xe6c469,
+  emissive: 0xffe6a8,
+};
+
+const vesper: CharacterDef = {
+  id: 'hero.vesper',
+  name: 'Vesper of the First Light',
+  kind: 'hero',
+  archetype: 'Healer',
+  proportions: prop({
+    height: 2.58,
+    legType: 'robe',
+    legFraction: 0.46,
+    hipHalfWidth: 0.18,
+    shoulderHalfWidth: 0.3,
+    torsoFraction: 0.31,
+    neckLength: 0.07,
+    headSize: 0.22,
+    armFraction: 0.44,
+    stoop: 0.04,
+    capeSegments: 4,
+    orbitCount: 2,
+  }),
+  profile: profile({
+    idlePeriod: 4.6,
+    breath: 1,
+    stanceWidth: 1,
+    crouch: 0.1,
+    armSplay: 0.22,
+    walkSpeed: 3.1,
+    runSpeed: 4.8,
+    stride: 1,
+    bob: 0.03,
+    lean: 0.06,
+    armSwing: 0.26,
+    attackDuration: 1.1,
+    attackStyle: 'thrust',
+    castDuration: 1.7,
+    castStyle: 'channel',
+    weight: 0.35,
+    capeSegments: 4,
+    orbitCount: 2,
+    orbitRadius: 0.44,
+  }),
+  slots: {
+    armor: slot('unit.steel', { tint: 'accent', roughness: 0.32, metalness: 1 }),
+    cloth: slot('unit.cloth', { tint: 'primary', metalness: 0 }),
+    leather: slot('unit.leather', { tint: 'secondary', metalness: 0 }),
+    metal: slot('structure.gold', { tint: 'accent', roughness: 0.24, metalness: 1 }),
+    flesh: slot('unit.skin', { tint: 'none', metalness: 0 }),
+    glow: slot('unit.bone', { tint: 'none', metalness: 0, emissiveIntensity: 4.6 }),
+  },
+  palette: VESPER_PALETTE,
+  visual: visual('hero.vesper', 'robe-bell-halo-lantern', VESPER_PALETTE, 1, ['cloth', 'gold']),
+  build(b, rig) {
+    const p = rig.proportions;
+    addBody(b, rig, {
+      torsoSlot: 'cloth',
+      limbSlot: 'cloth',
+      handSlot: 'flesh',
+      headSlot: 'flesh',
+      round: 5,
+      chestScale: 0.98,
+      waistScale: 0.92,
+      armScale: 0.95,
+      handScale: 1,
+      depthRatio: 0.7,
+      robe: { slot: 'cloth', flare: 0.62, hemNoise: 5 },
+      head: true,
+    });
+
+    const chest = rw(rig, B.chest);
+    const pelvis = rw(rig, B.pelvis);
+    const head = rw(rig, B.head);
+
+    // ── Halo: a ring of light that hangs above and slightly behind the head.
+    // The one shape in the cast that is pure emissive, so it survives at the
+    // zoom the game is actually played at.
+    b.add(torus(p.headSize * 0.92, 0.022, 8, 28), {
+      slot: 'glow',
+      bone: B.head,
+      at: [0, p.headSize * 1.25, -p.headSize * 0.1],
+      rot: [0.34, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1,
+    });
+    b.add(torus(p.headSize * 0.62, 0.014, 6, 22), {
+      slot: 'metal',
+      bone: B.head,
+      at: [0, p.headSize * 1.22, -p.headSize * 0.1],
+      rot: [0.34, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1,
+    });
+
+    // ── Mantle: a wide, soft shoulder piece that makes the bell read from the
+    // top down rather than only from the hem up.
+    b.add(
+      loft(
+        [
+          { y: chest[1] - 0.02, w: p.shoulderHalfWidth * 1.52, d: p.shoulderHalfWidth * 1.3, round: 6 },
+          { y: chest[1] + 0.16, w: p.shoulderHalfWidth * 1.24, d: p.shoulderHalfWidth * 1.06, round: 6 },
+          { y: chest[1] + 0.28, w: p.shoulderHalfWidth * 0.7, d: p.shoulderHalfWidth * 0.62, round: 5 },
+        ],
+        { segments: 14, smoothAngle: 46 },
+      ),
+      {
+        slot: 'cloth',
+        bind: { bones: [B.chest, B.neck], falloff: 0.34, bias: 1.2 },
+        uvScale: 1.4,
+      },
+    );
+    // Gold trim along the mantle's edge.
+    b.add(torus(p.shoulderHalfWidth * 1.5, 0.018, 6, 26), {
+      slot: 'metal',
+      at: [0, chest[1] - 0.03, 0],
+      rot: [Math.PI / 2, 0, 0],
+      bind: { bones: [B.chest], rigid: true },
+      uvScale: 1,
+    });
+
+    // ── Stole down the front, with a gem at the throat.
+    clothPanel(b, rig, {
+      slot: 'leather',
+      bones: [B.chest, B.spine, B.pelvis],
+      topY: chest[1] + 0.1,
+      bottomY: pelvis[1] - 0.5,
+      topW: 0.2,
+      bottomW: 0.26,
+      z: p.shoulderHalfWidth * 0.62,
+      hemPoint: 0.3,
+      thickness: 0.014,
+    });
+    b.add(gem(0.05, 0), {
+      slot: 'glow',
+      at: [0, chest[1] + 0.12, p.shoulderHalfWidth * 0.66],
+      bind: { bones: [B.chest], rigid: true },
+      uvScale: 1,
+    });
+
+    // ── Crook staff with a lantern: the healer's silhouette hook, held high in
+    // the right hand so it clears the mantle.
+    b.add(prism({ h: 1.9, w0: 0.032, d0: 0.032, w1: 0.028, d1: 0.028, round: 6, segments: 8 }), {
+      slot: 'leather',
+      bone: 'hand.R',
+      at: [0.02, 0.32, 0.12],
+      rot: [0.1, 0, 0.06],
+      bind: { bones: ['hand.R'], rigid: true },
+      uvScale: 1.4,
+    });
+    // The crook itself: a half ring at the top of the shaft.
+    b.add(torus(0.17, 0.026, 7, 18), {
+      slot: 'metal',
+      bone: 'hand.R',
+      at: [0.02, 1.18, 0.12],
+      rot: [0, 0, Math.PI / 2],
+      bind: { bones: ['hand.R'], rigid: true },
+      uvScale: 1,
+    });
+    // Lantern hanging inside the crook: cage, glass, light.
+    b.add(
+      loft(
+        [
+          { y: 0, w: 0.055, d: 0.055, round: 4 },
+          { y: 0.05, w: 0.085, d: 0.085, round: 4 },
+          { y: 0.2, w: 0.085, d: 0.085, round: 4 },
+          { y: 0.26, w: 0.05, d: 0.05, round: 4 },
+        ],
+        { segments: 8, smoothAngle: 40 },
+      ),
+      {
+        slot: 'metal',
+        bone: 'hand.R',
+        at: [0.02, 0.86, 0.12],
+        bind: { bones: ['hand.R'], rigid: true },
+        uvScale: 1.2,
+      },
+    );
+    b.add(sphereish(0.062, 10, 8, 1.1), {
+      slot: 'glow',
+      bone: 'hand.R',
+      at: [0.02, 0.99, 0.12],
+      bind: { bones: ['hand.R'], rigid: true },
+      uvScale: 1,
+    });
+
+    // ── Two motes orbiting the lantern hand, echoing the halo.
+    for (const sz of [-1, 1]) {
+      b.add(gem(0.03, 0), {
+        slot: 'glow',
+        bone: 'hand.L',
+        at: [sz * 0.12, 0.1, 0.06],
+        bind: { bones: ['hand.L'], rigid: true },
+        uvScale: 1,
+      });
+    }
+
+    void head;
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. Ruin Cleaver — melee creep
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CLEAVER_PALETTE: Palette = {
@@ -940,7 +1407,7 @@ const cleaver: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. Spinebolt Stalker — ranged creep
+// 6. Spinebolt Stalker — ranged creep
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SPINEBOLT_PALETTE: Palette = {
@@ -1116,7 +1583,7 @@ const spinebolt: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. Duskrunner — fast creep
+// 7. Duskrunner — fast creep
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DUSK_PALETTE: Palette = {
@@ -1327,7 +1794,7 @@ const duskrunner: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. Bastion Hulk — tank creep
+// 8. Bastion Hulk — tank creep
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BASTION_PALETTE: Palette = {
@@ -1513,7 +1980,7 @@ const bastion: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7. Hexwright — caster creep
+// 9. Hexwright — caster creep
 // ─────────────────────────────────────────────────────────────────────────────
 
 const HEX_PALETTE: Palette = {
@@ -1704,11 +2171,13 @@ const hexwright: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 8. Marrow Titan — boss
+// 10. Marrow Titan — boss
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Primary deliberately sits below the bone map's own mean: a brighter target
+// clamps the compensated tint at white and the sun blooms the whole figure out.
 const TITAN_PALETTE: Palette = {
-  primary: 0xbdb49a,
+  primary: 0x968b72,
   secondary: 0x3a352d,
   accent: 0x7d2b2b,
   emissive: 0x9cff5e,
@@ -1914,6 +2383,8 @@ const titan: CharacterDef = {
 export const CHARACTERS: readonly CharacterDef[] = [
   bulwark,
   oracle,
+  talon,
+  vesper,
   cleaver,
   spinebolt,
   duskrunner,
@@ -1938,7 +2409,30 @@ export interface BuiltCharacter {
 /** Builds geometry + rig for a definition. Cached: geometry is shared. */
 const CACHE = new Map<string, BuiltCharacter>();
 
+/**
+ * Imported meshes registered before the first spawn, keyed by character id.
+ *
+ * `buildCharacter` is synchronous and cached, but loading a glTF is not. Rather
+ * than make every caller async — gameplay spawns units mid-tick — an async boot
+ * pass loads and binds the models, registers them here, and `buildCharacter`
+ * simply prefers them. A character with no override builds procedurally exactly
+ * as before, so art can land one piece at a time.
+ */
+const OVERRIDES = new Map<string, BuiltCharacter>();
+
+export function registerBuiltOverride(id: string, built: BuiltCharacter): void {
+  OVERRIDES.set(id, built);
+  // Drop any procedural build already cached, so the next spawn picks this up.
+  CACHE.delete(id);
+}
+
+export function hasBuiltOverride(id: string): boolean {
+  return OVERRIDES.has(id);
+}
+
 export function buildCharacter(def: CharacterDef): BuiltCharacter {
+  const override = OVERRIDES.get(def.id);
+  if (override) return override;
   const cached = CACHE.get(def.id);
   if (cached) return cached;
   const rig = buildRig(def.proportions);

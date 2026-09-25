@@ -241,7 +241,8 @@ export class CharacterBuilder {
     const cfg = this.slotConfig[slot] ?? { material: 'unit.steel' as MaterialId };
     const tintKey = cfg.tint ?? 'primary';
     const base = tintKey === 'none' ? undefined : this.palette[tintKey];
-    const color = base !== undefined ? shadeHex(base, cfg.shade ?? 1) : undefined;
+    const color =
+      base !== undefined ? compensateTint(shadeHex(base, cfg.shade ?? 1), cfg.material) : undefined;
     return materials.get(cfg.material, {
       key: `unit:${this.defId}:${slot}`,
       ...(color !== undefined ? { color } : {}),
@@ -307,4 +308,69 @@ function shadeHex(hex: number, shade: number): number {
   const g = Math.min(255, Math.round(((hex >> 8) & 0xff) * shade));
   const b = Math.min(255, Math.round((hex & 0xff) * shade));
   return (r << 16) | (g << 8) | b;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tint compensation
+//
+// `MeshStandardMaterial.color` MULTIPLIES the albedo map, and the unit maps are
+// authored with their own chroma (cloth is dusty violet, chitin near-black).
+// A mid-tone palette colour times a dark map lands near black — the exact
+// failure the first showcase capture showed. The fix: treat the palette entry
+// as the colour the surface should APPEAR, and solve for the tint that gets
+// there — target ÷ map-average, computed in linear space where the GPU does the
+// multiply, clamped at white (a tint cannot brighten past the map itself).
+// The map's texture detail survives because only the mean is normalised.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AVG_ALBEDO = new Map<MaterialId, [number, number, number]>();
+
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function linearToSrgb(c: number): number {
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+}
+
+/** Mean linear-space albedo of a generated material map, sampled sparsely. */
+function averageAlbedo(id: MaterialId): [number, number, number] {
+  let avg = AVG_ALBEDO.get(id);
+  if (avg) return avg;
+  const image = materials.textures(id).albedo.image as {
+    data?: Uint8Array | Uint8ClampedArray;
+  };
+  const data = image?.data;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  if (data && data.length >= 4) {
+    const stride = 4 * 13; // sparse, stride co-prime with row length
+    for (let i = 0; i + 2 < data.length; i += stride) {
+      r += srgbToLinear(data[i]! / 255);
+      g += srgbToLinear(data[i + 1]! / 255);
+      b += srgbToLinear(data[i + 2]! / 255);
+      n++;
+    }
+  }
+  avg = n > 0 ? [r / n, g / n, b / n] : [0.5, 0.5, 0.5];
+  AVG_ALBEDO.set(id, avg);
+  return avg;
+}
+
+/** Tint that makes `id`'s map average out to the target colour on screen. */
+function compensateTint(target: number, id: MaterialId): number {
+  const avg = averageAlbedo(id);
+  const tr = srgbToLinear(((target >> 16) & 0xff) / 255);
+  const tg = srgbToLinear(((target >> 8) & 0xff) / 255);
+  const tb = srgbToLinear((target & 0xff) / 255);
+  const r = Math.min(1, tr / Math.max(avg[0], 1e-4));
+  const g = Math.min(1, tg / Math.max(avg[1], 1e-4));
+  const b = Math.min(1, tb / Math.max(avg[2], 1e-4));
+  return (
+    (Math.round(linearToSrgb(r) * 255) << 16) |
+    (Math.round(linearToSrgb(g) * 255) << 8) |
+    Math.round(linearToSrgb(b) * 255)
+  );
 }

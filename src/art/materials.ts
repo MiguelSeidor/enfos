@@ -78,10 +78,18 @@ export const GROUND_LAYER_IDS = [
 const GROUND_SIZE = 512;
 const DETAIL_SIZE = 256;
 
-/** Shared detail defaults — one place to retune close-range readability. */
+/**
+ * Shared detail defaults — one place to retune close-range readability.
+ *
+ * The fade window used to be [24, 78] m. The hero and terrainDetail shots put
+ * the camera 25–40 m out, so the detail layer was already 20–70% faded at the
+ * exact zoom it exists to serve, and the ground read as flat under it. [40, 130]
+ * keeps it at full strength through the whole hero range and still has it gone
+ * well before overview distance, where it would only alias.
+ */
 const detail = (spec: Omit<DetailSpec, 'size'> & { size?: number }): DetailSpec => ({
   size: DETAIL_SIZE,
-  fade: [24, 78],
+  fade: [40, 130],
   ...spec,
 });
 
@@ -89,52 +97,136 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
   // -------------------------------------------------------------------------
   // Ground
   // -------------------------------------------------------------------------
+  // Terrain tiles this at 9 m per repeat, so 512 px is 1.76 cm/texel and the
+  // 0.5–1.5 m mid band is f6–f18.
   'ground.grass': {
     id: 'ground.grass',
     size: GROUND_SIZE,
     seed: 1101,
+    // Green, not yellow-green: hue held near 84 deg by keeping red about 19
+    // points above blue. The v2 ramp sat at 71 deg and ran 4.1:1 dark-to-light,
+    // which the warm key (0xffcb92 at intensity 7) plus ACES turned into the
+    // acid stipple in the combat capture. 2.2:1 and 0.27 saturation at the top
+    // stop leaves the chroma to the light rig.
+    // Bottom stop lifted 0x30 -> 0x36. The hero capture had 28.4% of pixels
+    // under 10% luma with none over 90%; a chunk of that is the render grade,
+    // but a ground whose darkest albedo is 0.19 sRGB *before* baked cavity and
+    // the cavity tint has nothing left to give once it is in shadow.
+    // Widened from a 2.2:1 range to about 3.4:1, by lifting the top stops only.
+    //
+    // Measured against the paved lane, which is the one ground layer that reads
+    // well: its albedo spans 74 luma levels between the 5th and 95th
+    // percentiles, where grass spanned 26. All the tuft structure below was
+    // being authored into a band too narrow to see, so the ground resolved as
+    // flat mottle no matter how good the layers were.
+    //
+    // The bottom stops are untouched on purpose. They were raised deliberately
+    // once before because the hero capture had 28 % of pixels under 10 % luma,
+    // and darkening them again would undo that fix — the range has to come from
+    // the light end.
     ramp: [
-      { stop: 0.0, color: 0x1e2c14 },
-      { stop: 0.3, color: 0x354a1e },
-      { stop: 0.58, color: 0x4c6528 },
-      { stop: 0.82, color: 0x627c33 },
-      { stop: 1.0, color: 0x84934a },
+      { stop: 0.0, color: 0x363c25 },
+      { stop: 0.3, color: 0x4a5636 },
+      { stop: 0.6, color: 0x647146 },
+      { stop: 0.84, color: 0x7d8b58 },
+      { stop: 1.0, color: 0x97a76b },
     ],
     layers: [
-      // Clumping at the metre scale — the thing that stops a lawn look.
-      { kind: 'fbm', frequency: 5, amplitude: 1, octaves: 5, warp: 0.05 },
-      // Tufts. Worley cells at tuft scale, screened so they sit on top.
-      { kind: 'cell', frequency: 26, amplitude: 0.42, op: 'screen', jitter: 1 },
-      // Blade direction. Stretched noise, faint, breaks the isotropy of fBm.
+      // Turf density drift at ~0.8 m. Low amplitude on purpose: this is value
+      // variation, not structure. The v2 recipe gave its f5 (1.8 m) term half
+      // the range, which is precisely the "large-scale mottled blur" defect.
+      { kind: 'clumps', frequency: 11, amplitude: 0.34, octaves: 3, width: 0.26, warp: 0.07 },
+      // Three tuft scales, each grown through its OWN low-frequency density
+      // field. The v3 recipe had two tuft layers at uniform density across the
+      // whole tile, which is what read as a regular stipple at mid distance:
+      // every square metre had the same number of tufts of the same size, and
+      // constant density is a screen pattern no matter how the dots are jittered.
+      //
+      // Real turf grows in patches — tussocks where it is wet, thin scalps where
+      // it is trodden. Masking each layer separately means density, dominant
+      // tuft size and colour all vary together across the ground.
+      //
+      // Big tussocks, ~82 cm. Gives the field a second visual unit so it is not
+      // one dot size everywhere.
+      {
+        kind: 'tufts',
+        frequency: 11,
+        amplitude: 0.5,
+        jitter: 1,
+        threshold: 0.62,
+        across: 7,
+        width: 0.7,
+        op: 'screen',
+        mask: { from: 'noise', noise: { frequency: 4, octaves: 3, warp: 0.12, seed: 8 }, low: 0.3, high: 0.72 },
+      },
+      // Primary feature: 45 cm tufts, each with its own radius and blade
+      // direction.
+      {
+        kind: 'tufts',
+        frequency: 20,
+        amplitude: 0.9,
+        jitter: 1,
+        threshold: 0.34,
+        across: 6,
+        width: 0.66,
+        mask: { from: 'noise', noise: { frequency: 6, octaves: 3, warp: 0.1, seed: 11 }, low: 0.26, high: 0.7 },
+      },
+      // A finer, sparser tuft set filling the gaps at ~27 cm.
+      {
+        kind: 'tufts',
+        frequency: 33,
+        amplitude: 0.42,
+        jitter: 1,
+        threshold: 0.44,
+        across: 5,
+        width: 0.58,
+        op: 'screen',
+        seedOffset: 3,
+        mask: { from: 'noise', noise: { frequency: 8, octaves: 3, warp: 0.1, seed: 13 }, low: 0.3, high: 0.74 },
+      },
+      // Blade strokes, ~5 cm.
       {
         kind: 'grain',
         frequency: 26,
-        across: 130,
+        across: 170,
         shear: [1, 0],
-        amplitude: 0.3,
+        amplitude: 0.4,
         octaves: 2,
+        contrast: 1.3,
         op: 'overlay',
       },
-      { kind: 'fbm', frequency: 96, amplitude: 0.22, octaves: 3 },
+      { kind: 'fbm', frequency: 120, amplitude: 0.24, octaves: 1 },
     ],
     tints: [
-      // Sun-bleached patches. Low frequency so they read as terrain, not noise.
+      // Sun-bleached khaki, ~1.5 m.
       {
-        color: 0x9a9448,
-        mask: { from: 'noise', noise: { frequency: 3, octaves: 3, warp: 0.06 }, low: 0.52, high: 0.82 },
-        strength: 0.72,
+        color: 0x7a7355,
+        mask: { from: 'noise', noise: { frequency: 6, octaves: 3, warp: 0.06 }, low: 0.56, high: 0.86 },
+        strength: 0.45,
         roughness: 0.95,
       },
-      // Deep shade between clumps — cool, not just dark.
+      // Dry tips on tuft crowns. Pulled back from 0.34: with every crown lit to
+      // the same value the crowns themselves became the stipple.
       {
-        color: 0x16240f,
-        mask: { from: 'cavity', low: 0.28, high: 0.78, gamma: 1.3 },
-        strength: 0.62,
+        color: 0x767a58,
+        mask: { from: 'convex', low: 0.3, high: 0.78 },
+        strength: 0.27,
+        roughness: 0.9,
       },
-      // Soil showing through where the grass thins out.
+      // Shade between tufts. With the ramp compressed to 2.2:1 this tint and the
+      // AO map carry the depth that the ramp used to fake. 0.62 -> 0.52 for the
+      // same reason as the crown tint: the crown/gap contrast was doing as much
+      // to sell the screen pattern as the tuft geometry was.
       {
-        color: 0x3d3020,
-        mask: { from: 'noise', noise: { frequency: 7, octaves: 4, warp: 0.09, seed: 3 }, low: 0.62, high: 0.9 },
+        color: 0x252c1e,
+        mask: { from: 'cavity', low: 0.26, high: 0.76, gamma: 1.25 },
+        strength: 0.52,
+      },
+      // Bare soil in the thin spots. f14 = 64 cm: inside the mid band, where the
+      // v2 value of f8 put it at 1.1 m and it read as a macro blotch.
+      {
+        color: 0x4a4133,
+        mask: { from: 'noise', noise: { frequency: 14, octaves: 3, warp: 0.08, seed: 3 }, low: 0.62, high: 0.9 },
         strength: 0.55,
         roughness: 0.99,
       },
@@ -143,118 +235,235 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     roughnessBreakup: { frequency: 9, octaves: 3, amount: 0.1 },
     normalStrength: 2.0,
     aoStrength: 1.05,
-    bakedCavity: 0.3,
-    contrast: 1.08,
+    bakedCavity: 0.28,
+    // Raised from 1.18. Widening the ramp alone only got grass from 26 to 40
+    // luma levels of range because the *field* feeding it is clustered near the
+    // middle: the tuft layers are additive at amplitude 0.5–0.9 over a mid base,
+    // where the paved lane's brick layer swings nearly full range. Stretching
+    // the composited field is what lets the ramp's new width actually be used.
+    contrast: 1.95,
     detail: detail({
-      scale: 7,
+      scale: 6,
       layers: [
-        { kind: 'grain', frequency: 30, across: 150, shear: [1, 0], amplitude: 1, octaves: 3 },
-        { kind: 'speckle', frequency: 34, amplitude: 0.45, threshold: 0.45, op: 'screen' },
+        { kind: 'grain', frequency: 20, across: 64, shear: [1, 0], amplitude: 1, octaves: 2, contrast: 1.3 },
+        { kind: 'tufts', frequency: 16, amplitude: 0.6, jitter: 1, threshold: 0.32, across: 5, op: 'screen' },
+        { kind: 'speckle', frequency: 34, amplitude: 0.4, threshold: 0.5, op: 'screen' },
       ],
-      normalStrength: 1.15,
-      albedoAmount: 0.34,
-      roughAmount: 0.26,
+      normalStrength: 1.9,
+      albedoAmount: 0.45,
+      roughAmount: 0.3,
     }),
   },
 
+  // Terrain tiles this at 12.5 m per repeat (2.44 cm/texel), and — see the note
+  // at the bottom of this file — `src/world/groundMaterial.ts` also samples this
+  // albedo at 0.62 m per repeat as its close-range detail source. That second
+  // use means this map's f6–f20 content becomes the ground's 3–10 cm relief at
+  // hero zoom, so the mid band here has to carry two jobs at once.
   'ground.dirt': {
     id: 'ground.dirt',
     size: GROUND_SIZE,
     seed: 2203,
+    // 2.5:1 and 0.27 saturation at the top stop. The v2 ramp ran 6.7:1 from
+    // 0x21 to 0x7c, which is why every crack read as a near-black slash against
+    // a bright plate — and high-contrast structure is exactly what makes a tile
+    // period legible. Hue held at 34 deg (warm brown), not the 20-ish that the
+    // warm key was pushing into orange.
+    // Bottom stop lifted 0x2e -> 0x35 for the same reason as grass: this is the
+    // dominant surface in the hero shot, which failed the harness contrast check
+    // at 28.4% of pixels below 10% luma.
+    // Widened from 2.5:1 to about 3.5:1 by lifting the top stops, for the same
+    // reason as grass: dirt measured only 18 luma levels of range against the
+    // paved lane's 74, so its gravel and ruts had nowhere to show. Bottom stop
+    // held — the darkness complaint that motivated raising it still stands.
     ramp: [
-      { stop: 0.0, color: 0x241b14 },
-      { stop: 0.38, color: 0x3d2e21 },
-      { stop: 0.72, color: 0x55402c },
-      { stop: 1.0, color: 0x6e563c },
+      { stop: 0.0, color: 0x352d25 },
+      { stop: 0.38, color: 0x51452f },
+      { stop: 0.72, color: 0x6f6049 },
+      { stop: 1.0, color: 0x968268 },
     ],
     layers: [
-      { kind: 'fbm', frequency: 6, amplitude: 1, octaves: 5, warp: 0.08 },
-      // Dried mud plates. Subtracted, so the cracks are cut in, not piled on.
-      { kind: 'cracks', frequency: 11, amplitude: 0.5, width: 0.1, op: 'sub' },
-      { kind: 'cracks', frequency: 23, amplitude: 0.22, width: 0.07, op: 'sub' },
-      // Embedded grit, gated to the raised plates so it does not fill the cracks.
+      // Ground undulation.
+      //
+      // `gain: 0.6`, not the default 0.5, and six octaves rather than four. The
+      // v3 comment claimed "fractal so it has no characteristic scale to match",
+      // but that is not what an fBm with gain 0.5 does: the base octave carries
+      // twice the amplitude of the next and eight times the fourth, so f9 really
+      // did have a characteristic scale at 1.4 m. That is what produced the
+      // pale worm-and-flame mottle in the hero capture, and it matched tile to
+      // tile. A flatter spectrum spreads the energy so no one scale owns the
+      // silhouette — the same trap `ridged f7` set on the cliff.
+      { kind: 'fbm', frequency: 10, amplitude: 0.62, octaves: 5, gain: 0.6, warp: 0.07 },
+      // Root traces and desiccation, sinuous at two scales.
+      //
+      // Both Worley crack nets are gone. The v3 pass moved them from f11 to
+      // f20/f37 believing that was small enough; at a 12.5 m tile f20 is a 63 cm
+      // polygon, which is squarely inside the band the eye matches, and `op:sub`
+      // at amplitude 0.3 drew it as a high-contrast dark line. It was still the
+      // most legible repeat in the terrainDetail capture.
+      {
+        kind: 'rills',
+        frequency: 20,
+        amplitude: 0.22,
+        threshold: 0.56,
+        width: 0.26,
+        warp: 0.08,
+        op: 'sub',
+      },
+      {
+        kind: 'rills',
+        frequency: 34,
+        amplitude: 0.14,
+        threshold: 0.6,
+        width: 0.22,
+        warp: 0.06,
+        op: 'sub',
+        seedOffset: 4,
+      },
+      // One fine desiccation net at 23 cm — small enough to read as surface
+      // texture rather than as a shape.
+      { kind: 'cracks', frequency: 54, amplitude: 0.16, width: 0.045, op: 'sub' },
+      // Re-wetted / worn patches at ~83 cm, low contrast.
+      { kind: 'clumps', frequency: 15, amplitude: 0.2, octaves: 3, width: 0.3, warp: 0.08, op: 'overlay' },
+      // Pebbles pressed into the plates: 90 / 45 / 30 cm across three scales,
+      // 40% of cells empty. Gated to the raised plates so they do not fill the
+      // cracks. This is the layer that carries the hero-zoom crunch.
+      {
+        kind: 'pebbles',
+        frequency: 15,
+        amplitude: 0.34,
+        jitter: 1,
+        threshold: 0.4,
+        width: 0.55,
+        op: 'screen',
+        mask: { from: 'field', low: 0.35, high: 0.72 },
+      },
+      // Grit at ~21 cm.
       {
         kind: 'speckle',
         frequency: 60,
-        amplitude: 0.3,
-        threshold: 0.55,
+        amplitude: 0.32,
+        threshold: 0.48,
         op: 'screen',
-        mask: { from: 'field', low: 0.4, high: 0.75 },
+        mask: { from: 'field', low: 0.35, high: 0.75 },
       },
-      { kind: 'fbm', frequency: 110, amplitude: 0.18, octaves: 3 },
+      // f150 with 3 octaves ran its top octave at f600 on a 512 grid — under one
+      // sample per cycle, so it contributed pure aliased static at full cost.
+      { kind: 'fbm', frequency: 110, amplitude: 0.3, octaves: 1 },
     ],
     tints: [
       {
-        color: 0x191009,
+        color: 0x241d16,
         mask: { from: 'cavity', low: 0.22, high: 0.72, gamma: 1.15 },
         strength: 0.8,
         roughness: 1.0,
       },
-      // Pale dust on the high plates.
+      // Pale dust on the high plates and on pebble crowns.
       {
-        color: 0x8b7757,
+        color: 0x7d7160,
         mask: { from: 'convex', low: 0.3, high: 0.78 },
         strength: 0.45,
         roughness: 0.99,
       },
+      // Damp/dry drift. f9 = 1.4 m, up from f4 (3.1 m) which was a macro blotch
+      // big enough to be recognisable tile to tile.
       {
-        color: 0x4a3a2a,
-        mask: { from: 'noise', noise: { frequency: 4, octaves: 3, warp: 0.07 }, low: 0.45, high: 0.8 },
+        color: 0x453b30,
+        mask: { from: 'noise', noise: { frequency: 9, octaves: 3, warp: 0.07 }, low: 0.45, high: 0.8 },
         strength: 0.4,
       },
     ],
     roughness: { min: 0.84, max: 1.0 },
     roughnessBreakup: { frequency: 12, octaves: 3, amount: 0.08 },
-    normalStrength: 2.6,
-    aoStrength: 1.25,
-    bakedCavity: 0.34,
+    normalStrength: 2.4,
+    aoStrength: 1.2,
+    bakedCavity: 0.28,
+    // Dirt had no field contrast at all and measured the flattest of the four
+    // ground layers — 18 luma levels of range where the paved lane has 73.
+    contrast: 1.85,
     detail: detail({
       scale: 8,
       layers: [
         { kind: 'fbm', frequency: 40, amplitude: 1, octaves: 4 },
-        { kind: 'speckle', frequency: 26, amplitude: 0.6, threshold: 0.4, op: 'screen' },
-        { kind: 'cracks', frequency: 14, amplitude: 0.35, width: 0.09, op: 'sub' },
+        { kind: 'pebbles', frequency: 12, amplitude: 0.7, jitter: 1, threshold: 0.4, op: 'screen' },
+        { kind: 'speckle', frequency: 26, amplitude: 0.5, threshold: 0.4, op: 'screen' },
       ],
-      normalStrength: 1.5,
+      normalStrength: 2.1,
       albedoAmount: 0.36,
       roughAmount: 0.28,
     }),
   },
 
+  // Terrain tiles this at 15 m, and takes its *normal* map at 1.24 m per repeat
+  // as the ground's close-range relief. So this recipe's f3–f12 normal content
+  // becomes the 10–40 cm bumps under the hero camera — the reason the low
+  // frequencies here stay strong while every other ground recipe pushes them up.
   'ground.rock': {
     id: 'ground.rock',
     size: GROUND_SIZE,
     seed: 3307,
+    // Widened for the same reason as grass and dirt: 31 luma levels of range
+    // against the paved lane's 74. Rock is mostly seen on cliff faces, where
+    // the strata and broken slabs below are the whole read, and they were being
+    // compressed into near-flat grey.
     ramp: [
-      { stop: 0.0, color: 0x1d2024 },
-      { stop: 0.42, color: 0x343941 },
-      { stop: 0.74, color: 0x4d545e },
-      { stop: 1.0, color: 0x6b737d },
+      { stop: 0.0, color: 0x303338 },
+      { stop: 0.42, color: 0x4c525a },
+      { stop: 0.74, color: 0x6b727c },
+      { stop: 1.0, color: 0x939ba6 },
     ],
     layers: [
-      { kind: 'ridged', frequency: 4, amplitude: 1, octaves: 5, warp: 0.06 },
-      // Broken slabs rather than round pebbles: low jitter keeps cells blocky.
-      { kind: 'cobble', frequency: 9, amplitude: 0.55, jitter: 0.75, op: 'overlay' },
-      { kind: 'cracks', frequency: 9, amplitude: 0.45, width: 0.12, op: 'sub' },
-      { kind: 'fbm', frequency: 100, amplitude: 0.2, octaves: 3 },
+      // `gain: 0.6` for the same reason as the dirt base: ridged multifractal
+      // concentrates energy on the base octave's crests, so f6 at gain 0.5 was a
+      // network of 2.5 m blobs — a matchable shape at a sixth of the tile. f10
+      // with a flatter spectrum keeps the crest character without the signature.
+      { kind: 'ridged', frequency: 10, amplitude: 1, octaves: 5, gain: 0.6, warp: 0.06 },
+      // Broken slabs at ~94/47/31 cm with per-block size variation. `cobble`
+      // put every block on one lattice; at 15 m per tile that lattice was
+      // readable as a grid from overview height.
+      {
+        kind: 'pebbles',
+        frequency: 16,
+        amplitude: 0.5,
+        jitter: 1,
+        threshold: 0.34,
+        width: 0.6,
+        op: 'overlay',
+      },
+      // Fractures. f24 was a 62 cm polygon net, inside the matchable band and
+      // drawn as a hard dark line; at f48 the net reads as fracture texture.
+      { kind: 'cracks', frequency: 48, amplitude: 0.2, width: 0.05, op: 'sub' },
+      { kind: 'rills', frequency: 22, amplitude: 0.2, threshold: 0.58, width: 0.24, warp: 0.07, op: 'sub' },
+      // Scree collecting in the hollows. `low > high` inverts the window.
+      {
+        kind: 'pebbles',
+        frequency: 30,
+        amplitude: 0.3,
+        jitter: 1,
+        threshold: 0.45,
+        width: 0.5,
+        op: 'screen',
+        mask: { from: 'field', low: 0.55, high: 0.2 },
+      },
+      { kind: 'fbm', frequency: 110, amplitude: 0.24, octaves: 1 },
     ],
     tints: [
       {
-        color: 0x101216,
+        color: 0x24272c,
         mask: { from: 'cavity', low: 0.2, high: 0.7 },
         strength: 0.85,
         roughness: 0.95,
       },
       // Lichen. Sits on flat upward faces, avoids the fresh broken edges.
       {
-        color: 0x5c6b3a,
-        mask: { from: 'noise', noise: { frequency: 6, octaves: 4, warp: 0.1, seed: 5 }, low: 0.58, high: 0.86 },
-        strength: 0.5,
+        color: 0x545c3e,
+        mask: { from: 'noise', noise: { frequency: 10, octaves: 4, warp: 0.1, seed: 5 }, low: 0.58, high: 0.86 },
+        strength: 0.45,
         roughness: 0.96,
       },
       // Polished exposure on the high faces — the only place rock gets shiny.
       {
-        color: 0x8d959d,
+        color: 0x848a92,
         mask: { from: 'convex', low: 0.34, high: 0.8 },
         strength: 0.35,
         roughness: 0.55,
@@ -262,137 +471,218 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     ],
     roughness: { min: 0.58, max: 0.92 },
     roughnessBreakup: { frequency: 14, octaves: 3, amount: 0.1 },
-    normalStrength: 3.2,
-    aoStrength: 1.45,
-    bakedCavity: 0.34,
+    normalStrength: 3.0,
+    aoStrength: 1.4,
+    bakedCavity: 0.32,
+    // Rock is what every cliff face in the map is made of, and its strata and
+    // broken slabs were resolving into near-flat grey. Slightly gentler than
+    // grass and dirt because ridged multifractal already concentrates energy in
+    // its crests, and over-stretching it turns the crests into white slashes.
+    contrast: 1.4,
     detail: detail({
       scale: 7,
       layers: [
         { kind: 'ridged', frequency: 28, amplitude: 1, octaves: 3 },
-        { kind: 'cracks', frequency: 18, amplitude: 0.4, width: 0.1, op: 'sub' },
+        { kind: 'pebbles', frequency: 11, amplitude: 0.55, jitter: 1, threshold: 0.36, op: 'screen' },
+        { kind: 'cracks', frequency: 18, amplitude: 0.35, width: 0.08, op: 'sub' },
       ],
-      normalStrength: 1.6,
+      normalStrength: 2.2,
       albedoAmount: 0.32,
       roughAmount: 0.3,
     }),
   },
 
+  // Tiled at 8.5 m. The lane runs through the middle of every fight, so this is
+  // the surface the camera sits closest to for longest.
   'ground.path': {
     id: 'ground.path',
     size: GROUND_SIZE,
     seed: 4409,
+    // Cool grey stone, not brown earth. The old recipe was a compacted dirt
+    // trail — gravel pressed into mud with cart ruts — which is why the route
+    // read as "where the grass has worn away" rather than as a built road. The
+    // lane is the map's one piece of infrastructure and it should look laid,
+    // not trodden.
     ramp: [
-      { stop: 0.0, color: 0x2a2319 },
-      { stop: 0.45, color: 0x463c2c },
-      { stop: 0.78, color: 0x5d5140 },
-      { stop: 1.0, color: 0x776850 },
+      { stop: 0.0, color: 0x38393d },
+      { stop: 0.42, color: 0x5b5d61 },
+      { stop: 0.76, color: 0x7c7e81 },
+      { stop: 1.0, color: 0x9a9b9c },
     ],
     layers: [
-      // Compacted base, deliberately smooth: a trail is flatter than the ground.
-      { kind: 'fbm', frequency: 7, amplitude: 1, octaves: 4, warp: 0.05 },
-      // Gravel pressed into the surface, only where the base is not rutted.
+      // Flagstone courses. `rows`/`cols` chosen against the layer's 8.5 m tile
+      // (see `uLayerScale.w` in world/groundMaterial.ts): 6 × 3 gives slabs
+      // roughly 1.4 m across, which is a paving stone a person could lift and
+      // reads as masonry rather than as tiling at RTS distance.
+      { kind: 'bricks', frequency: 1, rows: 6, cols: 3, mortar: 0.055, amplitude: 1 },
+      // Marble veining, gated to the slab faces so it never crosses a joint —
+      // veins that run through mortar destroy the illusion of separate stones.
       {
-        kind: 'cobble',
-        frequency: 30,
-        amplitude: 0.4,
-        jitter: 1,
-        op: 'screen',
-        mask: { from: 'field', low: 0.35, high: 0.8 },
+        kind: 'flow',
+        frequency: 7,
+        amplitude: 0.34,
+        octaves: 4,
+        warp: 0.22,
+        op: 'overlay',
+        mask: { from: 'field', low: 0.35, high: 0.85 },
       },
-      // Ruts along the direction of travel.
+      // Per-slab tonal variation. Without it every stone is the same grey and
+      // the courses read as printed, not quarried.
       {
-        kind: 'grain',
-        frequency: 40,
-        across: 4,
-        shear: [0, 0],
-        amplitude: 0.35,
-        octaves: 2,
+        kind: 'cell',
+        frequency: 6,
+        amplitude: 0.26,
+        jitter: 1,
         op: 'overlay',
       },
-      { kind: 'speckle', frequency: 70, amplitude: 0.22, threshold: 0.5, op: 'screen' },
-      { kind: 'fbm', frequency: 104, amplitude: 0.16, octaves: 3 },
+      // Wear: chipped edges and hairline fractures.
+      { kind: 'cracks', frequency: 22, amplitude: 0.3, op: 'mul' },
+      // Fine surface tooth so the stone is not glassy under a low sun.
+      { kind: 'fbm', frequency: 46, amplitude: 0.22, octaves: 3, warp: 0.04, op: 'overlay' },
+      { kind: 'speckle', frequency: 96, amplitude: 0.18, threshold: 0.5, op: 'screen' },
     ],
     tints: [
+      // Grime settled into the joints.
       {
-        color: 0x191309,
-        mask: { from: 'cavity', low: 0.24, high: 0.74 },
-        strength: 0.78,
+        color: 0x24262a,
+        mask: { from: 'cavity', low: 0.2, high: 0.72 },
+        strength: 0.82,
       },
-      // Dust polished into the crown of the trail by traffic.
+      // Traffic polish on the crowns: lighter and markedly smoother, which is
+      // what makes a paved road look walked on rather than merely dirty.
       {
-        color: 0x93825f,
-        mask: { from: 'convex', low: 0.3, high: 0.75 },
-        strength: 0.5,
-        roughness: 0.88,
+        color: 0xb4b6b8,
+        mask: { from: 'convex', low: 0.34, high: 0.8 },
+        strength: 0.46,
+        roughness: 0.42,
       },
+      // Slow warm drift across the whole surface so a long straight run of
+      // paving does not read as one flat value.
       {
-        color: 0x574a33,
-        mask: { from: 'noise', noise: { frequency: 5, octaves: 3, warp: 0.05, seed: 2 }, low: 0.45, high: 0.85 },
-        strength: 0.35,
+        color: 0x6e6a62,
+        mask: { from: 'noise', noise: { frequency: 9, octaves: 3, warp: 0.06, seed: 7 }, low: 0.42, high: 0.86 },
+        strength: 0.3,
       },
     ],
-    roughness: { min: 0.7, max: 0.95 },
-    roughnessBreakup: { frequency: 10, octaves: 3, amount: 0.09 },
-    normalStrength: 2.3,
-    aoStrength: 1.2,
-    bakedCavity: 0.3,
+    // Lower than the dirt it replaced: cut stone is smoother than earth, and
+    // the contrast against the surrounding ground is half of what sells it.
+    roughness: { min: 0.4, max: 0.78 },
+    roughnessBreakup: { frequency: 12, octaves: 3, amount: 0.08 },
+    // Strong, because the joints are the read. The recessed mortar has to hold
+    // its shadow from a camera 40 m up.
+    normalStrength: 2.6,
+    aoStrength: 1.3,
+    bakedCavity: 0.32,
     detail: detail({
       scale: 8,
       layers: [
-        { kind: 'cobble', frequency: 22, amplitude: 1, jitter: 1 },
-        { kind: 'speckle', frequency: 30, amplitude: 0.5, threshold: 0.42, op: 'screen' },
+        { kind: 'fbm', frequency: 14, amplitude: 1, octaves: 3, warp: 0.05 },
+        { kind: 'speckle', frequency: 34, amplitude: 0.42, threshold: 0.5, op: 'screen' },
       ],
-      normalStrength: 1.4,
-      albedoAmount: 0.34,
-      roughAmount: 0.26,
+      normalStrength: 1.5,
+      albedoAmount: 0.22,
+      roughAmount: 0.2,
     }),
   },
 
+  // Tiled at 10 m. Note: nothing in `world/` currently selects this layer — the
+  // terrain splat uses grass / dirt / rock / path — so it does not appear in the
+  // QA captures. It is still a published `GROUND_LAYER_IDS` member, so it has to
+  // be right the day someone adds a shoreline.
   'ground.sand': {
     id: 'ground.sand',
     size: GROUND_SIZE,
     seed: 5501,
+    // Pulled down from a 0xb0 top: at 0.69 sRGB the crests were the brightest
+    // albedo in the library by a wide margin and would clip under the warm key
+    // before the light rig got a say. 2:1, which is about right for dry sand —
+    // its apparent contrast comes from ripple shading, not from the ramp.
     ramp: [
-      { stop: 0.0, color: 0x5f5134 },
-      { stop: 0.45, color: 0x7e6d48 },
-      { stop: 0.78, color: 0x9a865c },
-      { stop: 1.0, color: 0xb3a072 },
+      { stop: 0.0, color: 0x625a48 },
+      { stop: 0.45, color: 0x7d7460 },
+      { stop: 0.78, color: 0x948b76 },
+      { stop: 1.0, color: 0xa79d87 },
     ],
     layers: [
-      // Wind ripples. `dunes` phase is (u*sx + v*sy) * frequency, so the cycle
-      // count along u is frequency*sx: 4 * [3,2] gives 12 by 8 cycles at ~34
-      // degrees. The migrated value (frequency 12, shear [3,2]) was 36 by 24 —
-      // three times finer than the stripe it replaced, which read as fabric.
-      { kind: 'dunes', frequency: 4, shear: [3, 2], amplitude: 1, octaves: 3 },
-      // A second ripple set at a different angle, the way real sand interferes.
-      { kind: 'dunes', frequency: 3, shear: [1, 3], amplitude: 0.35, octaves: 2, op: 'overlay' },
-      { kind: 'fbm', frequency: 9, amplitude: 0.4, octaves: 4, warp: 0.06, op: 'add' },
-      { kind: 'speckle', frequency: 90, amplitude: 0.16, threshold: 0.5, op: 'screen' },
-      { kind: 'fbm', frequency: 120, amplitude: 0.14, octaves: 2 },
+      // Primary ripple train, ~42 cm crest to crest. `dunes` phase is
+      // (u*sx + v*sy) * frequency, so the cycle count along u is frequency*sx:
+      // 8 * [3,2] gives 24 by 16 cycles at ~34 degrees.
+      //
+      // The v3 recipe chased the fabric read downward in frequency — 36x24 to
+      // 12x8 — which only produced coarser fabric, because the defect was never
+      // the wavelength. It was that a single sine train with one low-frequency
+      // warp stays phase-coherent across the whole tile. The fix is in the
+      // generator (two warp scales plus patchy coverage); with that in place a
+      // fine ripple is free to be fine.
+      {
+        kind: 'dunes',
+        frequency: 8,
+        shear: [3, 2],
+        amplitude: 1,
+        octaves: 3,
+        warp: 0.5,
+        threshold: 0.42,
+      },
+      // A second train at a different angle and scale — real sand interferes.
+      {
+        kind: 'dunes',
+        frequency: 5,
+        shear: [1, 3],
+        amplitude: 0.4,
+        octaves: 2,
+        warp: 0.75,
+        threshold: 0.55,
+        op: 'overlay',
+        seedOffset: 2,
+      },
+      // Wind-scoured hollows and drifts at ~77 cm, kept low-amplitude: at f9 and
+      // 0.34 these were the recognisable shape in the tile.
+      { kind: 'clumps', frequency: 13, amplitude: 0.24, octaves: 3, width: 0.3, warp: 0.09, op: 'overlay' },
+      // Coarse lag: shell fragments and grit concentrated in the hollows, where
+      // the wind has taken the fines away. `low > high` inverts the window.
+      {
+        kind: 'pebbles',
+        frequency: 26,
+        amplitude: 0.26,
+        jitter: 1,
+        threshold: 0.6,
+        width: 0.5,
+        op: 'screen',
+        mask: { from: 'field', low: 0.55, high: 0.18 },
+      },
+      { kind: 'speckle', frequency: 90, amplitude: 0.18, threshold: 0.52, op: 'screen' },
+      { kind: 'fbm', frequency: 110, amplitude: 0.16, octaves: 1 },
     ],
     tints: [
       {
-        color: 0x4a3f28,
+        color: 0x4c4638,
         mask: { from: 'cavity', low: 0.3, high: 0.8 },
         strength: 0.5,
       },
       // Coarse grains collect on the crests and catch the light.
       {
-        color: 0xc9b783,
+        color: 0xbdb29a,
         mask: { from: 'convex', low: 0.34, high: 0.82 },
-        strength: 0.45,
+        strength: 0.42,
         roughness: 0.78,
+      },
+      // Damp and mineral-stained drifts at ~1.1 m. A bright, near-uniform
+      // surface has nothing but colour variation to break its repeat with.
+      {
+        color: 0x796f58,
+        mask: { from: 'noise', noise: { frequency: 9, octaves: 3, warp: 0.08, seed: 4 }, low: 0.52, high: 0.88 },
+        strength: 0.35,
       },
     ],
     roughness: { min: 0.8, max: 0.96 },
     roughnessBreakup: { frequency: 8, octaves: 3, amount: 0.07 },
-    normalStrength: 1.5,
+    normalStrength: 1.7,
     aoStrength: 0.85,
     bakedCavity: 0.2,
     detail: detail({
       scale: 9,
       layers: [
-        { kind: 'dunes', frequency: 6, shear: [3, 2], amplitude: 1, octaves: 2 },
+        { kind: 'dunes', frequency: 5, shear: [3, 2], amplitude: 1, octaves: 2, warp: 0.6, threshold: 0.4 },
         { kind: 'speckle', frequency: 40, amplitude: 0.55, threshold: 0.35, op: 'screen' },
       ],
       normalStrength: 0.9,
@@ -405,69 +695,158 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     id: 'cliff.stone',
     size: GROUND_SIZE,
     seed: 6607,
+    // Projected triplanar at 15 m by `world/groundMaterial.ts`, which desaturates
+    // this by 55%, warms it, and multiplies it by up to 1.45 from its own band and
+    // fBm terms. That headroom is why the ramp tops out at 0x73 rather than the
+    // v3 value of 0x7e: at 0x7e the lit faces landed above 0.7 albedo, ACES pushed
+    // them to near-white, and every bit of relief on a sunlit face was crushed
+    // flat — the "pale tan slab" in the review. 2.7:1, near-neutral with a slight
+    // cool bias since the consumer supplies the warmth.
     ramp: [
-      { stop: 0.0, color: 0x191c20 },
-      { stop: 0.36, color: 0x2f343b },
-      { stop: 0.68, color: 0x474e58 },
-      { stop: 0.88, color: 0x616a75 },
-      { stop: 1.0, color: 0x7d8792 },
+      { stop: 0.0, color: 0x2b2e33 },
+      { stop: 0.34, color: 0x3d4147 },
+      { stop: 0.64, color: 0x51565d },
+      { stop: 0.86, color: 0x646a72 },
+      { stop: 1.0, color: 0x737a83 },
     ],
     layers: [
-      { kind: 'ridged', frequency: 3, amplitude: 1, octaves: 6, warp: 0.07 },
-      // Sedimentary bedding. `grain` stretched the other way from bark: many
-      // cycles along v, almost none across u, which is a horizontal band. The
-      // migrated `terrace` version quantised an isotropic fBm, so it produced
-      // blotches rather than strata — right idea, wrong axis.
+      // PRIMARY STRUCTURE: sedimentary bedding, ~68 cm courses.
+      //
+      // This replaces the v3 `ridged f7 octaves 6` base, which was the actual
+      // cause of the "repeating cracked-polygon pattern". Ridged multifractal is
+      // not scale-free the way the v3 comment claimed: the `prev` attenuation
+      // concentrates energy on the *base* octave's crests, so f7 produced a
+      // network of 2 m blobs — one distinctive shape at 1/7 of the tile, which
+      // is precisely the stamp rule 1 in `textures.ts` forbids. In the 3x3
+      // preview you could match blob for blob between neighbouring tiles.
+      //
+      // Bedding is the right primary for a cliff and it is structurally immune
+      // to the stamp: an anisotropic band field carries almost no information
+      // along u, so a repeat reads as *more strata* rather than as the same
+      // shape again. There is nothing for the eye to match.
       {
         kind: 'grain',
-        frequency: 22,
-        across: 3,
+        frequency: 20,
+        across: 5,
         shear: [0, 0],
-        amplitude: 0.5,
+        amplitude: 1,
         octaves: 3,
-        contrast: 1.7,
-        op: 'overlay',
+        warp: 0.08,
+        contrast: 1.4,
       },
-      // Fractures across the bedding.
-      { kind: 'cracks', frequency: 7, amplitude: 0.5, width: 0.13, op: 'sub' },
-      { kind: 'cracks', frequency: 17, amplitude: 0.25, width: 0.08, op: 'sub' },
-      { kind: 'fbm', frequency: 108, amplitude: 0.2, octaves: 3 },
+      // Fractal roughening over the bands. fBm, not ridged: scale-free, so it
+      // adds relief without adding a matchable shape.
+      { kind: 'fbm', frequency: 15, amplitude: 0.4, octaves: 5, warp: 0.07, op: 'overlay' },
+      // Columnar jointing: near-vertical fractures. This is the term that gives
+      // a vertical face vertical relief — bedding alone shades a wall in
+      // horizontal stripes and nothing else.
+      //
+      // `scratches`, not `grain`. A `grain` joint field is a sum of sheared
+      // sinusoid-like octaves, so it puts a fracture at *every* cycle: crossed
+      // with the bedding that produced a visible basket weave, which is just as
+      // regular a lattice as the blob net it replaced. Thresholding keeps only
+      // the strongest excursions, so the joints land at irregular spacing and in
+      // irregular numbers, which is what real columnar jointing does.
+      // `frequency` is the cycle count along v: at 3 a surviving joint ran most
+      // of the tile's height, so the two or three that cleared the threshold
+      // became per-tile landmarks and the 3x3 preview showed them as a regular
+      // grid of dashes. 7 segments them at bedding-plane spacing, which is both
+      // how real jointing terminates and enough of them that no one joint is
+      // recognisable.
+      {
+        kind: 'scratches',
+        frequency: 7,
+        across: 20,
+        shear: [0, 0],
+        amplitude: 0.34,
+        threshold: 0.64,
+        op: 'sub',
+      },
+      // A second, coarser joint set at a different spacing, so the joint pattern
+      // itself has no single signature frequency.
+      {
+        kind: 'scratches',
+        frequency: 4,
+        across: 9,
+        shear: [1, 0],
+        amplitude: 0.2,
+        threshold: 0.74,
+        op: 'sub',
+        seedOffset: 5,
+      },
+      // Broken block faces at 62 / 31 / 21 cm, gated to the proud courses so
+      // they sit on the ledges instead of filling the joints.
+      {
+        kind: 'pebbles',
+        frequency: 24,
+        amplitude: 0.32,
+        jitter: 1,
+        threshold: 0.42,
+        width: 0.55,
+        op: 'screen',
+        mask: { from: 'field', low: 0.4, high: 0.82 },
+      },
+      // Weathering runs down the face. Sinuous, so unlike a Worley net it leaves
+      // no polygon to recognise.
+      {
+        kind: 'rills',
+        frequency: 22,
+        amplitude: 0.16,
+        threshold: 0.6,
+        width: 0.22,
+        warp: 0.08,
+        op: 'sub',
+      },
+      // One fine fracture set at 29 cm cells. Small enough that the polygon is
+      // below the scale the eye matches tile to tile; the v3 pair at f27/f45 sat
+      // right in the matchable band.
+      { kind: 'cracks', frequency: 52, amplitude: 0.18, width: 0.04, op: 'sub' },
+      { kind: 'fbm', frequency: 120, amplitude: 0.24, octaves: 1 },
     ],
     tints: [
       {
-        color: 0x0d0f13,
+        color: 0x22252a,
         mask: { from: 'cavity', low: 0.18, high: 0.68 },
-        strength: 0.88,
+        strength: 0.8,
       },
-      // Iron staining running down the face — the warm accent against the blue
+      // Iron staining running down the face — the warm accent against the cool
       // stone, and the thing that keeps a grey cliff from reading as a grey wall.
+      // f12 rather than f4: at 15 m a f4 stain is a 3.75 m blotch, which is a
+      // recognisable shape, and colour stamps just as hard as height does.
       {
-        color: 0x6d4a2c,
-        mask: { from: 'noise', noise: { frequency: 4, octaves: 4, warp: 0.14, seed: 7 }, low: 0.55, high: 0.9 },
-        strength: 0.42,
+        color: 0x5c483a,
+        mask: { from: 'noise', noise: { frequency: 12, octaves: 4, warp: 0.14, seed: 7 }, low: 0.55, high: 0.9 },
+        strength: 0.4,
         roughness: 0.9,
       },
+      // Bleached, wind-scoured course faces. Keyed off the bedding through the
+      // height field rather than off convexity, so whole courses lighten
+      // together the way a real exposed bed does.
       {
-        color: 0x9aa2ab,
+        color: 0x848b94,
         mask: { from: 'convex', low: 0.36, high: 0.84 },
-        strength: 0.4,
-        roughness: 0.6,
+        strength: 0.34,
+        roughness: 0.62,
       },
     ],
     roughness: { min: 0.54, max: 0.9 },
     roughnessBreakup: { frequency: 11, octaves: 3, amount: 0.1 },
+    // 3.2 -> 3.6 with the bedding carrying real mid-scale gradient now. The v3
+    // map had strong micro-crinkle and nothing between 30 cm and the tile, which
+    // is what made a lit face read as painted rather than lit.
     normalStrength: 3.6,
-    aoStrength: 1.5,
-    bakedCavity: 0.36,
-    contrast: 1.1,
+    aoStrength: 1.45,
+    bakedCavity: 0.3,
+    contrast: 1.15,
     detail: detail({
       scale: 6,
       layers: [
-        { kind: 'ridged', frequency: 26, amplitude: 1, octaves: 3 },
-        { kind: 'cracks', frequency: 16, amplitude: 0.45, width: 0.09, op: 'sub' },
+        { kind: 'grain', frequency: 18, across: 4, shear: [0, 0], amplitude: 1, octaves: 3, contrast: 1.3 },
+        { kind: 'pebbles', frequency: 14, amplitude: 0.5, jitter: 1, threshold: 0.34, op: 'screen' },
+        { kind: 'cracks', frequency: 24, amplitude: 0.34, width: 0.06, op: 'sub' },
         { kind: 'speckle', frequency: 44, amplitude: 0.3, threshold: 0.55, op: 'screen' },
       ],
-      normalStrength: 1.7,
+      normalStrength: 2.3,
       albedoAmount: 0.3,
       roughAmount: 0.3,
     }),

@@ -18,6 +18,7 @@
 
 import * as THREE from 'three';
 import { BlendFunction, Effect } from 'postprocessing';
+import type { ShoulderSettings } from './shoulder';
 
 // ── Stage 1: scene-linear ────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ uniform float uExposure;
 uniform float uContrast;
 uniform float uPreSaturation;
 uniform vec3 uWhiteBalance;
+uniform vec2 uToe;   // x amount, y range
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec3 c = max(inputColor.rgb, 0.0) * uExposure * uWhiteBalance;
@@ -35,6 +37,25 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // map still has real highlight range to roll off.
   const float pivot = 0.18;
   c = pow(c / pivot, vec3(uContrast)) * pivot;
+
+  // Shadow rolloff. The contrast exponent above is applied about 18% grey, so
+  // everything well below the pivot is divided by a large number and raised to a
+  // power > 1 — it does not just darken, it collapses. Shadowed ground an octave
+  // apart in the raw render ends up a few thousandths apart here, and the frame
+  // gets a large mass of pixels that are dark *and* indistinguishable, which is
+  // what "crushed" actually means.
+  //
+  // This returns slope to that mass: an exponential falloff keyed on luminance,
+  // so it is at full strength in the deepest shadow and has decayed to nothing
+  // by the time it reaches lit ground. It multiplies rather than adds, so zero
+  // maps to zero and true black survives — this lifts the shadows' *contrast*,
+  // not the black point.
+  //
+  // Keyed on luminance rather than per channel on purpose: a per-channel version
+  // lifts whichever channel is smallest by the largest factor, which desaturates
+  // exactly the cool shadow tint the light rig exists to produce.
+  float lt = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c *= 1.0 + uToe.x * exp(-lt / max(uToe.y, 1e-4));
 
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   c = mix(vec3(l), c, uPreSaturation);
@@ -52,6 +73,7 @@ export class SceneGradeEffect extends Effect {
         ['uContrast', new THREE.Uniform(1)],
         ['uPreSaturation', new THREE.Uniform(1)],
         ['uWhiteBalance', new THREE.Uniform(new THREE.Vector3(1, 1, 1))],
+        ['uToe', new THREE.Uniform(new THREE.Vector2(0, 1))],
       ]),
     });
   }
@@ -73,6 +95,7 @@ export class SceneGradeEffect extends Effect {
       p.whiteBalance[1],
       p.whiteBalance[2],
     );
+    (this.uniforms.get('uToe')!.value as THREE.Vector2).set(p.toeAmount, p.toeRange);
   }
 }
 
@@ -160,6 +183,16 @@ export interface GradePreset {
   sceneSaturation: number;
   /** Per-channel scene-linear multiplier. Warmer key: r>1, b<1. */
   whiteBalance: [number, number, number];
+  /**
+   * Extra slope returned to the darkest shadows after the contrast curve, as a
+   * multiplier at zero luminance. 0.3 means the deepest shadow keeps 30% more
+   * separation than the raw power curve left it. Black stays black either way.
+   */
+  toeAmount: number;
+  /** Scene-linear luminance over which the toe decays by 1/e. */
+  toeRange: number;
+  /** Highlight expansion applied after bloom, before the tone map. */
+  shoulder: ShoulderSettings;
   lift: [number, number, number];
   gamma: [number, number, number];
   gain: [number, number, number];

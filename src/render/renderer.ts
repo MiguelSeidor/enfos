@@ -7,7 +7,8 @@
  *  0  RenderPass          scene -> linear HDR (half float)
  *  1  N8AOPostPass        GTAO, multiplied into the beauty buffer
  *  2  EffectPass          AtmosphereEffect -> SceneGradeEffect        (still linear HDR)
- *  3  EffectPass          Bloom -> ToneMapping(ACES) -> FilmGrade -> Vignette   (-> LDR)
+ *  3  EffectPass          Bloom -> HighlightShoulder -> ToneMapping(ACES)
+ *                                -> FilmGrade -> Vignette              (-> LDR)
  *  4  EffectPass          SMAA
  *  5  EffectPass          Sharpen
  * ```
@@ -23,6 +24,13 @@
  *
  * Scene-linear grading happens in pass 2 so that pass 3's bloom threshold is
  * expressed in the same exposed units the tone curve will see.
+ *
+ * `HighlightShoulder` is inside pass 3 rather than pass 2 for the same reason in
+ * reverse: it expands the top of the range so lit metal and emitters climb the
+ * ACES shoulder, and doing that upstream of the bloom threshold would push the
+ * building emissives — which `world/structures.ts` parks just under 1.05 on
+ * purpose — over the line and smear them. After bloom, the threshold still sees
+ * the un-expanded value. See effects/shoulder.ts.
  *
  * ## Budget
  *
@@ -52,7 +60,9 @@ import { LightRig, MOOD_AMBER_STORM, type MoodPreset } from './lighting';
 import { FittedShadow } from './shadows';
 import { AtmosphereEffect } from './effects/atmosphere';
 import { FilmGradeEffect, SceneGradeEffect } from './effects/grade';
+import { HighlightShoulderEffect } from './effects/shoulder';
 import { SharpenEffect } from './effects/sharpen';
+import { OpaqueOutputEffect } from './effects/opaque';
 
 export type QualityTier = 'low' | 'medium' | 'high' | 'ultra';
 
@@ -122,6 +132,43 @@ const QUALITY: Record<QualityTier, QualitySettings> = {
   },
 };
 
+/**
+ * Hard ceiling on the render scale, whatever tier is selected.
+ *
+ * A phone reports `devicePixelRatio` 3 or 4, and this pipeline runs five
+ * fullscreen passes: at native density that is four times the fill cost of a
+ * desktop frame on a tenth of the hardware, which is a slideshow. Two is the
+ * point past which no one can see the difference at arm's length anyway, so it
+ * is the ceiling here and every tier cap is read through it.
+ */
+const MAX_PIXEL_RATIO = 2;
+
+/**
+ * True where the primary pointer cannot hover: phones, tablets, anything driven
+ * by fingers. Used for defaults only - nothing about input behaviour is decided
+ * from it, since a laptop with a touchscreen has both.
+ */
+export function isCoarsePointer(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+}
+
+/**
+ * Quality tier to boot with on this device.
+ *
+ * Desktop keeps `high`, unchanged. A touch device starts lower because the
+ * expensive parts of the frame are the ones it can least afford and least
+ * shows off: AO and bloom are fill-rate bound, and at phone size the frame is
+ * too small for either to read. The options screen overrides this and the
+ * override is what persists, so this is only the first-run guess.
+ */
+export function defaultQualityTier(): QualityTier {
+  if (!isCoarsePointer()) return 'high';
+  // Tablets have the screen area and usually the thermal headroom for the
+  // middle tier; a phone-sized viewport gets the cheap one.
+  const shortSide = Math.min(window.innerWidth, window.innerHeight);
+  return shortSide < 600 ? 'low' : 'medium';
+}
+
 /** Material texture slots worth an anisotropic sampler. */
 const ANISOTROPIC_SLOTS = [
   'map',
@@ -147,11 +194,12 @@ export class RenderModule implements GameModule {
   private sharpenPass!: EffectPass;
   private atmosphere!: AtmosphereEffect;
   private sceneGrade!: SceneGradeEffect;
+  private shoulder!: HighlightShoulderEffect;
   private filmGrade!: FilmGradeEffect;
   private lights!: LightRig;
   private shadow!: FittedShadow;
 
-  private tier: QualityTier = 'high';
+  private tier: QualityTier = defaultQualityTier();
   private mood: MoodPreset = MOOD_AMBER_STORM;
   private readonly projVec = new THREE.Vector3();
   private width = 1920;
@@ -248,8 +296,14 @@ export class RenderModule implements GameModule {
     // tops out near 1.0; only genuine emitters exceed it. That makes this an
     // emissive-only bloom without needing a selection list of objects owned by
     // other subsystems, and it is why the frame does not smear.
+    // Intensity pulled back from 0.85. The threshold is unchanged and must stay
+    // unchanged — world/structures.ts tunes its emissives against 1.05 — but at
+    // 0.85 anything that did cross it threw a halo wide enough to swallow the
+    // hero's helmet, which is bloom being used as a smear rather than as an
+    // accent. Lower intensity keeps the emitters reading as emitters and gives
+    // the silhouette its edge back.
     this.bloom = new BloomEffect({
-      intensity: 0.85,
+      intensity: 0.55,
       luminanceThreshold: 1.05,
       luminanceSmoothing: 0.1,
       mipmapBlur: true,
@@ -257,19 +311,34 @@ export class RenderModule implements GameModule {
       levels: 5,
     });
 
+    // Must stay between bloom and the tone map. See the header and shoulder.ts.
+    this.shoulder = new HighlightShoulderEffect(this.mood.grade.shoulder);
+
     const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
 
     this.filmGrade = new FilmGradeEffect();
     this.filmGrade.apply(this.mood.grade);
 
+    // Reach, not depth, was the problem with the previous 0.32/0.62. The effect
+    // multiplies by `smoothstep(0.8, offset * 0.799, d * (darkness + offset))`,
+    // which held full brightness only inside d = 0.27 and had already dimmed the
+    // frame edges to 0.66x and the corners to 0.15x. On a top-down camera the
+    // subject is spread across the whole frame rather than centred, so that was
+    // not a vignette, it was a 60% crop with a soft edge — and it was destroying
+    // the highlights it happened to land on. The `junction` shot's only sunlit
+    // ground sits low-left, and it could not cross 90% luminance because the
+    // vignette was taking a third of it back.
+    //
+    // These numbers hold full brightness out to d = 0.46, leave the frame edges
+    // at 0.97x, and still close the true corners down to 0.29x.
     const vignette = new VignetteEffect({
       blendFunction: BlendFunction.NORMAL,
-      offset: 0.32,
-      darkness: 0.62,
+      offset: 0.55,
+      darkness: 0.4,
     });
 
     this.composer.addPass(
-      new EffectPass(this.camera, this.bloom, tone, this.filmGrade, vignette),
+      new EffectPass(this.camera, this.bloom, this.shoulder, tone, this.filmGrade, vignette),
     );
 
     // ── Pass 4: AA on the finished LDR image ──
@@ -286,13 +355,25 @@ export class RenderModule implements GameModule {
     this.sharpen = new SharpenEffect(QUALITY[this.tier].sharpen);
     this.sharpenPass = new EffectPass(this.camera, this.sharpen);
     this.composer.addPass(this.sharpenPass);
+
+    // ── Pass 6: opaque output ──
+    // Must be last and must never be disabled. Two reasons:
+    //  1. Nothing upstream writes alpha, so the chain hands the default
+    //     framebuffer a fully transparent image (see effects/opaque.ts).
+    //  2. EffectComposer marks the *last pass in the list* as renderToScreen
+    //     whether or not it is enabled. The sharpen pass above turns itself off
+    //     on the low tier, which would leave nothing presenting to the screen.
+    // A permanently enabled terminal pass fixes both.
+    this.composer.addPass(new EffectPass(this.camera, new OpaqueOutputEffect()));
   }
 
   applyQuality(tier: QualityTier): void {
     this.tier = tier;
     const q = QUALITY[tier];
 
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatioCap));
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio || 1, q.pixelRatioCap, MAX_PIXEL_RATIO),
+    );
     this.shadow.configure(q.shadowMapSize, q.shadowRange);
     this.applyAnisotropy(q.anisotropy);
 
@@ -341,6 +422,7 @@ export class RenderModule implements GameModule {
     this.atmosphere.apply(mood.atmosphere);
     this.atmosphere.setSunDirection(this.lights.sunDirection);
     this.sceneGrade.apply(mood.grade);
+    this.shoulder.apply(mood.grade.shoulder);
     this.filmGrade.apply(mood.grade);
     this.targetExposure = mood.grade.exposure;
     this.currentExposure = mood.grade.exposure;
@@ -361,6 +443,18 @@ export class RenderModule implements GameModule {
   }
 
   render(_alpha: number, dt: number): void {
+    // EffectComposer sets `autoClear = false` in its constructor, on the
+    // assumption that every pass clears its own output. N8AOPostPass is a
+    // third-party pass and does not: it blends into whatever the target already
+    // holds, so with clearing disabled the occlusion term re-applies to the
+    // previous frame's result and the image saturates to white within a second.
+    //
+    // This was invisible for a long time because the headless capture harness
+    // screenshots after a fixed settle and the bug is frame-order dependent, so
+    // captures kept coming back correct while a normal window went white. Forcing
+    // the clear back on each frame is safe — every other pass draws a fullscreen
+    // triangle that covers the target completely.
+    this.renderer.autoClear = true;
     this.composer.render(dt);
   }
 

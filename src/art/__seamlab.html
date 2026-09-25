@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>cost lab</title>
+<style>body { background:#181818; color:#ddd; font:12px monospace; }</style>
+<script type="module">
+  import { materials } from './materials.ts';
+  // Exposed for the CDP profiler harness: generation happens on demand so the
+  // profile covers exactly one recipe and nothing else.
+  window.__gen = (id) => { const s = materials.textures(id); return s.size; };
+  window.__LAB_DONE__ = true;
+</script>

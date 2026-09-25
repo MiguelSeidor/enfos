@@ -49,8 +49,17 @@ export function hash01(x: number, y: number, seed: number): number {
   return ihash(x, y, seed) / 4294967296;
 }
 
-/** Positive modulo for integers. */
+/**
+ * Positive modulo for integers.
+ *
+ * The `0 <= a < n` fast path is not premature: this is the single most-called
+ * function in texture generation — four calls per `perlin`, six per `worley`,
+ * four per `sampleGridWrap` — and a CPU profile of one 512 recipe put it at 10%
+ * of total self time. The overwhelming majority of those calls are already in
+ * range, and skipping the division for them is most of that 10%.
+ */
 export function pmod(a: number, n: number): number {
+  if (a >= 0) return a < n ? a : a % n;
   const m = a % n;
   return m < 0 ? m + n : m;
 }
@@ -199,8 +208,15 @@ export function billow(
  * `f1`/`f2` are the two nearest feature-point distances in cell units,
  * `id` is the winning cell's hash (per-cell random values: cobble tint, brick
  * height jitter), and `cx`/`cy` are its wrapped lattice coordinates.
+ *
+ * `ox`/`oy` are the vector **from the sample to the winning feature point**, in
+ * cell units. Anything that needs to vary *inside* a cell rather than merely
+ * per-cell needs this: a tuft's blades run along a per-cell direction, a pebble's
+ * shading depends on which side of the stone the sample is on. Without it every
+ * cellular layer can only produce radially symmetric domes, which is exactly the
+ * "uniform stipple" read the grass had.
  */
-export const worleyResult = { f1: 0, f2: 0, id: 0, cx: 0, cy: 0 };
+export const worleyResult = { f1: 0, f2: 0, id: 0, cx: 0, cy: 0, ox: 0, oy: 0 };
 
 /**
  * Periodic Worley noise, F1 and F2. Feature points stay inside their own cell
@@ -224,13 +240,25 @@ export function worley(
   let id = 0;
   let bx = 0;
   let by = 0;
+  let ox = 0;
+  let oy = 0;
+
+  // Wrapped lattice indices for the 3x3 neighbourhood, resolved once per call
+  // rather than once per cell: this loop was the largest single source of
+  // `pmod` calls in the module, at eighteen per lookup instead of six.
+  const wxm = pmod(xi - 1, px);
+  const wx0 = pmod(xi, px);
+  const wxp = pmod(xi + 1, px);
+  const wym = pmod(yi - 1, py);
+  const wy0 = pmod(yi, py);
+  const wyp = pmod(yi + 1, py);
 
   for (let dy = -1; dy <= 1; dy++) {
+    const wy = dy < 0 ? wym : dy === 0 ? wy0 : wyp;
     for (let dx = -1; dx <= 1; dx++) {
       const cx = xi + dx;
       const cy = yi + dy;
-      const wx = pmod(cx, px);
-      const wy = pmod(cy, py);
+      const wx = dx < 0 ? wxm : dx === 0 ? wx0 : wxp;
       const h = ihash(wx, wy, seed);
       const jx = ((h & 0xffff) / 65536 - 0.5) * jitter;
       const jy = (((h >>> 16) & 0xffff) / 65536 - 0.5) * jitter;
@@ -243,6 +271,8 @@ export function worley(
         id = h;
         bx = wx;
         by = wy;
+        ox = fxp;
+        oy = fyp;
       } else if (d < d2) {
         d2 = d;
       }
@@ -254,6 +284,8 @@ export function worley(
   worleyResult.id = id;
   worleyResult.cx = bx;
   worleyResult.cy = by;
+  worleyResult.ox = ox;
+  worleyResult.oy = oy;
 }
 
 /**
@@ -300,24 +332,35 @@ export function boxBlurWrap(
   const r = Math.max(1, Math.round(radius));
   const w = 1 / (r * 2 + 1);
 
+  // The window edges advance by one per step and wrap at most once, so they are
+  // carried as running indices with a compare instead of a modulo. At five radii
+  // over two passes this removed four `pmod` calls per texel per blur.
   for (let y = 0; y < n; y++) {
     const row = y * n;
     let sum = 0;
     for (let k = -r; k <= r; k++) sum += src[row + pmod(k, n)]!;
+    let out = pmod(-r, n);
+    let inn = pmod(r + 1, n);
     for (let x = 0; x < n; x++) {
       tmp[row + x] = sum * w;
-      sum -= src[row + pmod(x - r, n)]!;
-      sum += src[row + pmod(x + r + 1, n)]!;
+      sum -= src[row + out]!;
+      sum += src[row + inn]!;
+      if (++out === n) out = 0;
+      if (++inn === n) inn = 0;
     }
   }
 
   for (let x = 0; x < n; x++) {
     let sum = 0;
     for (let k = -r; k <= r; k++) sum += tmp[pmod(k, n) * n + x]!;
+    let out = pmod(-r, n);
+    let inn = pmod(r + 1, n);
     for (let y = 0; y < n; y++) {
       dst[y * n + x] = sum * w;
-      sum -= tmp[pmod(y - r, n) * n + x]!;
-      sum += tmp[pmod(y + r + 1, n) * n + x]!;
+      sum -= tmp[out * n + x]!;
+      sum += tmp[inn * n + x]!;
+      if (++out === n) out = 0;
+      if (++inn === n) inn = 0;
     }
   }
 }

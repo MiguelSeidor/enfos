@@ -3,13 +3,25 @@
  *
  * ## The mood, chosen and committed to
  *
- * **Late afternoon, an hour before a storm front arrives.** Amber key, teal
- * shadow. This is the one decision everything else in this file serves:
+ * **Mid-afternoon, a storm front building on the far side of the valley.** Amber
+ * key, teal shadow. This is the one decision everything else in this file serves:
  *
- *  - The sun sits at **27°** elevation. High enough that shadows do not smear
- *    across the whole play space and destroy unit readability, low enough that
- *    every ridge and every unit throws a shadow roughly 2x its own height — which
- *    is what makes a top-down frame read as three-dimensional at all.
+ *  - The sun sits at **36°** elevation. This is the number that moved most, and
+ *    it moved for a measured reason. The map was rebuilt as a lane corridor
+ *    between highland plateaus roughly 10 m tall. A 27° sun throws a shadow
+ *    `10 / tan 27° = 19.6 m` long — wider than the corridors themselves — so the
+ *    lanes were not lit by a low sun, they were *roofed* by it. The `junction`
+ *    capture came back with 85% of frame inside one cast shadow, a mean
+ *    luminance of 0.20, and no pixel anywhere above 0.78. At 36° the same
+ *    shadow is 13.8 m and the corridor floor gets sun, while a caster still
+ *    throws about 1.4x its own height — plenty of shadow to read form and
+ *    elevation from. Ground facing the sky also gains 30% irradiance
+ *    (`sin 36° / sin 27°`), which is what finally gives lit stone the range to
+ *    reach the top of the histogram.
+ *
+ *    Do not push this lower again without re-running `junction` and `overview`.
+ *    The romance of a low sun is real, and on this map it costs the frame its
+ *    entire highlight range.
  *  - The key is **amber** (~3400K). The fill is **teal-blue** (~9000K). That
  *    ~5600K spread between lit and shadowed surfaces is the single largest
  *    contributor to a frame reading as art-directed rather than as a default
@@ -57,23 +69,37 @@ export interface MoodPreset {
 
 export const MOOD_AMBER_STORM: MoodPreset = {
   id: 'amber-storm',
-  sunElevation: 27,
+  sunElevation: 36,
   sunAzimuth: 320,
   sky: { turbidity: 9.5, rayleigh: 2.6, mieCoefficient: 0.005, mieDirectionalG: 0.87 },
-  key: { color: 0xffcb92, intensity: 7.0 },
-  rim: { color: 0x9dc4ff, intensity: 1.9, elevation: 13, azimuthOffset: 172 },
+  key: { color: 0xffcb92, intensity: 8.2 },
+  // Raised from 1.5. The rim is the only source that reaches a surface the key
+  // cannot see, so in a backlit shot — `junction` looks straight into the sun —
+  // it is carrying every camera-facing face in frame on its own. At 1.5 those
+  // faces were a single flat navy value; this is what gives them shape.
+  rim: { color: 0x92bcff, intensity: 2.4, elevation: 16, azimuthOffset: 172 },
   // Key:fill lands near 9:1. Anything flatter and shadowed faces never reach the
   // bottom decile of the histogram; anything steeper and they go dead black,
   // which the rubric penalises just as hard as a washed-out frame.
-  fill: { sky: 0x6f96d2, ground: 0x2c2019, intensity: 0.62 },
-  environmentIntensity: 0.2,
+  // The fill sky colour is kept low-chroma on purpose: shadowed cliff faces see
+  // this light almost unopposed, so any saturation here reads multiplied.
+  fill: { sky: 0x86a4cd, ground: 0x38281c, intensity: 0.7 },
+  // Raised from 0.2. This is the pipeline's only source of specular that is not
+  // a single directional lobe, so at 0.2 a metal surface had almost nothing to
+  // reflect and read as flat paint. The v0 failure this number was set low to
+  // avoid — a strong sky IBL lighting every surface from every direction and
+  // flattening the frame to grey-green — is a real failure, but it starts well
+  // above this: the key-to-ambient ratio here is still better than 8:1.
+  environmentIntensity: 0.34,
   atmosphere: {
     // Density is deliberately low. The first pass at 0.055 put ~84% haze on the
     // far side of an overview shot, which lifted the whole midground off the
     // black point and cost the frame its darks — the exact failure the brief
-    // warned about. At 0.016 the far rim still separates from the near ground
-    // but nothing in the play space is tinted.
-    density: 0.016,
+    // warned about. 0.016 still left a milky veil pooling in the ravines (they
+    // are the low ground, so height falloff concentrates haze exactly where the
+    // frame's darkest pixels live); 0.011 keeps the far rim separation without
+    // lifting the ravine floor off the black point.
+    density: 0.011,
     heightFalloff: 26,
     baseHeight: -12,
     startDistance: 20,
@@ -84,20 +110,54 @@ export const MOOD_AMBER_STORM: MoodPreset = {
     horizonStrength: 0.85,
     highlightPunch: 0.9,
   },
+  // Saturation discipline: ACES filmic already adds chroma, so neither grade
+  // stage boosts it meaningfully — the warm/cool story is carried by white
+  // balance, split toning and the light rig, not by a saturation slider. The
+  // previous values (1.12 pre + 1.14 post) compounded into candy.
   grade: {
-    exposure: 2.3,
-    sceneContrast: 1.34,
-    sceneSaturation: 1.12,
-    whiteBalance: [1.05, 1.0, 0.94],
-    lift: [-0.022, -0.017, -0.008],
+    // 2.3 left every shot's histogram empty above 0.85 — lit stone never
+    // reached the ACES shoulder, which read as underexposed sparkle-less mush.
+    // Pulled back from 2.75 to pay for the brighter key and the higher sun.
+    // Exposure sets where the *midtones* land; the top of the range is bought by
+    // the shoulder below, which is why this can come down while highlights go up.
+    exposure: 1.95,
+    // Raised with exposure lowered to match. This pair is the one that widens
+    // both tails at once: the power curve is pivoted on 18% grey, so a steeper
+    // exponent pushes everything under the pivot down and everything over it up
+    // while the pivot itself does not move. Exposure alone can only slide the
+    // whole histogram, which trades one end of the rubric for the other.
+    sceneContrast: 1.42,
+    sceneSaturation: 1.02,
+    whiteBalance: [1.04, 1.0, 0.96],
+    // Returns separation to the shadow mass the contrast curve collapses. See
+    // the long note in effects/grade.ts — it multiplies, so black stays black.
+    toeAmount: 0.15,
+    toeRange: 0.05,
+    // The frame's only source of real highlights. Everything below the knee is
+    // untouched, so this buys top-end range without moving the midtones or the
+    // mean. Sits after bloom so the 1.05 threshold structures.ts is tuned
+    // against never sees the expansion.
+    // The knee is in post-exposure scene-linear units, so it has to track
+    // exposure: when exposure came down from 2.75 to 2.05 a fixed knee stopped
+    // catching the same surfaces and the highlights went with it.
+    shoulder: { knee: 0.36, width: 0.75, gain: 2.6, rolloff: 1.6 },
+    // The previous lift of -0.022/-0.017/-0.008 was a per-channel black clip:
+    // with gain applied first it drove red to zero below 0.021 and green below
+    // 0.017 while blue survived to 0.008, so every cool shadow lost two channels
+    // before it lost the third and the shadow mass went to a flat hue with no
+    // detail in it. Shallower, and closer to matched across channels, keeps a
+    // true black without eating the last stop above it.
+    lift: [-0.017, -0.015, -0.011],
     gamma: [1.0, 1.0, 1.0],
-    gain: [1.12, 1.06, 1.0],
-    shadowTint: [-0.06, 0.0, 0.12],
-    highlightTint: [0.07, 0.02, -0.06],
+    gain: [1.06, 1.03, 1.0],
+    shadowTint: [-0.035, 0.0, 0.07],
+    highlightTint: [0.04, 0.015, -0.035],
     toneBalance: 0.55,
     shadowRange: 0.34,
-    saturation: 1.14,
-    sCurve: 0.38,
+    saturation: 1.04,
+    // Firms both ends: keeps the toe anchored under the exposure lift and
+    // pushes lit stone caps over the 90% line the rubric requires.
+    sCurve: 0.45,
   },
 };
 

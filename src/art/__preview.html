@@ -1,0 +1,137 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>art preview</title>
+<style>
+  body { background: #202020; color: #ddd; font: 12px monospace; margin: 8px; }
+  .row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
+  .cell { text-align: center; }
+  canvas { image-rendering: pixelated; display: block; }
+  h2 { font-size: 12px; margin: 2px 0; color: #8cf; }
+  pre { margin: 0; font-size: 11px; }
+</style>
+<div id="out"></div>
+<script type="module">
+  import { materials } from './materials.ts';
+  import { analyzeTileability, analyzeContrast, textureGenerationStats } from './textures.ts';
+
+  // World metres per texture repeat, as set by src/world/groundMaterial.ts.
+  // Everything here is previewed at the scale it actually ships at.
+  const WORLD_TILE = {
+    'ground.grass': 9.0,
+    'ground.dirt': 12.5,
+    'ground.rock': 15.0,
+    'ground.path': 8.5,
+    'ground.sand': 10.0,
+    'cliff.stone': 15.0,
+  };
+
+  const IDS = Object.keys(WORLD_TILE);
+  const ALL_IDS = [
+    ...IDS,
+    'prop.bark', 'prop.foliage', 'prop.stone',
+    'structure.masonry', 'structure.metal', 'structure.gold',
+    'unit.cloth', 'unit.leather', 'unit.steel', 'unit.skin', 'unit.bone', 'unit.chitin',
+  ];
+  const out = document.getElementById('out');
+
+  function draw(tex, px, reps, crop) {
+    const img = tex.image;
+    const src = document.createElement('canvas');
+    src.width = img.width;
+    src.height = img.height;
+    const sctx = src.getContext('2d');
+    const id = sctx.createImageData(img.width, img.height);
+    id.data.set(img.data);
+    sctx.putImageData(id, 0, 0);
+
+    const c = document.createElement('canvas');
+    c.width = px * reps;
+    c.height = px * reps;
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    if (crop) {
+      // Hero-zoom read: one quarter of the tile blown up.
+      g.drawImage(src, 0, 0, img.width / 4, img.height / 4, 0, 0, c.width, c.height);
+    } else {
+      for (let y = 0; y < reps; y++)
+        for (let x = 0; x < reps; x++) g.drawImage(src, x * px, y * px, px, px);
+    }
+    return c;
+  }
+
+  const t0 = performance.now();
+  const sets = {};
+  for (const id of IDS) sets[id] = materials.textures(id);
+  const totalMs = performance.now() - t0;
+
+  const lines = [];
+  for (const id of IDS) {
+    const set = sets[id];
+    const tileM = WORLD_TILE[id];
+
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    // Overview read: 3x3 repeats at ~13 px/m, the density of the overview shot.
+    const overview = draw(set.albedo, Math.round(tileM * 13), 3, false);
+    // Gameplay read: 2x2 repeats at ~34 px/m, the lane shot.
+    const lane = draw(set.albedo, Math.round(tileM * 34), 2, false);
+    // Hero read: quarter tile at ~1080/ (tileM/4) px/m.
+    const hero = draw(set.albedo, 150, 2, true);
+    const nrm = draw(set.normal, 150, 2, true);
+
+    for (const [label, c] of [
+      ['overview 3x3', overview],
+      ['lane 2x2', lane],
+      ['hero albedo', hero],
+      ['hero normal', nrm],
+    ]) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      const h = document.createElement('h2');
+      h.textContent = `${id} — ${label}`;
+      cell.appendChild(h);
+      cell.appendChild(c);
+      row.appendChild(cell);
+    }
+    out.appendChild(row);
+
+    const ta = analyzeTileability(set.albedo, id + ':albedo');
+    const tn = analyzeTileability(set.normal, id + ':normal');
+    const ca = analyzeContrast(set.albedo);
+    lines.push(
+      `${id.padEnd(14)} tile=${String(tileM).padStart(5)}m  ` +
+        `alb seam=${ta.seamStep.toFixed(2)}/max${ta.interiorMax.toFixed(2)} r=${ta.ratio.toFixed(2)} p${ta.percentile.toFixed(0)} ${ta.seamless ? 'OK ' : 'BAD'}  ` +
+        `nrm seam=${tn.seamStep.toFixed(2)}/max${tn.interiorMax.toFixed(2)} r=${tn.ratio.toFixed(2)} p${tn.percentile.toFixed(0)} ${tn.seamless ? 'OK ' : 'BAD'}  ` +
+        `luma min=${ca.min.toFixed(0)} max=${ca.max.toFixed(0)} mean=${ca.mean.toFixed(0)} sd=${ca.stdev.toFixed(1)} ` +
+        `range=${(ca.max / Math.max(1, ca.min)).toFixed(1)}:1`,
+    );
+  }
+
+  // Everything else, so the reported figure is the whole library rather than
+  // the six ground layers the image strip shows.
+  const t1 = performance.now();
+  materials.preload(ALL_IDS);
+  const restMs = performance.now() - t1;
+
+  const stats = textureGenerationStats();
+  let bytes = 0;
+  for (const s of stats) bytes += s.bytes;
+  lines.push('');
+  lines.push(`ground+cliff: ${totalMs.toFixed(0)} ms for ${IDS.length} recipes`);
+  lines.push(`remaining:    ${restMs.toFixed(0)} ms for ${ALL_IDS.length - IDS.length} recipes`);
+  lines.push(`LIBRARY TOTAL ${(totalMs + restMs).toFixed(0)} ms for ${stats.length} recipes`);
+  for (const s of stats) lines.push(`  ${s.id.padEnd(18)} ${s.ms.toFixed(0).padStart(5)} ms  ${(s.bytes / 1048576).toFixed(2)} MB`);
+  const rep = materials.report();
+  lines.push(`  texture upload ${(rep.textureBytes / 1048576).toFixed(1)} MB` +
+    `  + splat arrays ${(rep.splatBytes / 1048576).toFixed(1)} MB` +
+    `  = ${rep.totalMb} MB`);
+
+  const pre = document.createElement('pre');
+  pre.id = 'stats';
+  pre.textContent = lines.join('\n');
+  document.body.insertBefore(pre, out);
+  window.__PREVIEW_DONE__ = true;
+  window.__PREVIEW_TEXT__ = lines.join('\n');
+</script>

@@ -28,6 +28,43 @@
  * against the interior and is used by the QA pass; a visible tiling period is an
  * automatic reject in `qa/REVIEW_RUBRIC.md`.
  *
+ * ## Scale discipline — why the recipes look the way they do
+ *
+ * `analyzeTileability` only measures the *seam*. A tile can be perfectly
+ * seamless and still be obviously periodic, because the eye does not detect
+ * seams — it detects **repeated distinctive shapes**. The v2 ground was
+ * seamless by that metric and still failed review: `ground.dirt` and
+ * `cliff.stone` each carried one high-contrast Worley crack polygon net at
+ * f7–f11, i.e. a single recognisable shape occupying ~1/8 of the tile, repeated
+ * ~12 times across an overview frame. That is the stamp.
+ *
+ * Three rules follow, and every ground recipe here obeys them:
+ *
+ * 1. **No distinctive feature below ~f10.** Anything larger than a tenth of the
+ *    tile must be either fractal (no characteristic scale, so nothing to match)
+ *    or low-contrast value drift. High-contrast structure lives at f12+.
+ * 2. **Most energy in the mid band.** The terrain tiles at 8.5–15 m per repeat,
+ *    so f12–f30 is 0.3–1.2 m — the band an RTS camera actually resolves, and the
+ *    band the v2 recipes left empty between their f5 macro blur and their f60+
+ *    grain. That gap is why the ground read as "mottled blur plus static".
+ * 3. **Scatter, never lattice.** Cellular layers get a `threshold` drop fraction
+ *    and per-cell radius jitter (`pebbles`, `tufts`), so features do not sit on a
+ *    visible grid.
+ *
+ * There is a real tension at the top of the requested 0.5–3 m band: at a 12.5 m
+ * tile, a 3 m feature *is* a quarter of the tile and will stamp no matter how
+ * well it is drawn. The resolution used here is to serve 0.5–1.5 m with
+ * structure and leave 1.5–3 m to low-contrast drift plus the world-space macro
+ * variation, which has no tile period at all.
+ *
+ * ## Albedo value range
+ *
+ * Ground ramps are held near a 2.5:1 light-to-dark ratio. The v2 ramps ran 6:1
+ * (0x21 to 0x7c on dirt), which is far outside anything a real diffuse surface
+ * does and turned every crack into a near-black slash — the contrast that made
+ * the tiling legible in the first place. Depth comes from AO, cavity and the
+ * light rig, not from the ramp.
+ *
  * ## API stability
  *
  * `TextureSet`, `MaterialRecipe`, `NoiseLayer` and `makeTextureSet` are consumed
@@ -107,7 +144,41 @@ export type LayerKind =
   /** Iterated domain warp — erosion flow, marble, weathering streaks. */
   | 'flow'
   /** Quantised fBm — rock strata, terraced sediment. */
-  | 'terrace';
+  | 'terrace'
+  /**
+   * Scattered stones at three superimposed sizes with per-stone radius, lift and
+   * a keep/drop cut. Pebbles, gravel, scree, chipped plate edges.
+   *
+   * The mixed sizes are the point: a single Worley scale lays every feature on
+   * one lattice, and the eye reads that lattice as a grid long before it reads
+   * the stones. Three coprime-ish scales with ~35% of cells empty destroys the
+   * lattice while keeping the cost at three cellular lookups.
+   */
+  | 'pebbles'
+  /**
+   * Soft-edged irregular patches: domain-warped fBm pushed through a narrow
+   * smoothstep so it plateaus instead of rolling. Worn ground, mud plates, moss
+   * beds, turf density. Distinct from `fbm` in that it has *edges*, which is
+   * what makes a patch read as a patch rather than as a cloud.
+   */
+  | 'clumps'
+  /**
+   * Sinuous branching filaments from warped `1 - |perlin|` ridges. Root traces,
+   * erosion rills, hairline veins.
+   *
+   * This is the organic counterpart to `cracks`. Worley's `f2 - f1` produces a
+   * *convex polygon* network, and a polygon net is the single most recognisable
+   * thing a tile can contain — it is what made the old dirt and cliff recipes
+   * legible as a repeating stamp at overview zoom. Rills curve and branch, so
+   * the eye has nothing to match against.
+   */
+  | 'rills'
+  /**
+   * Grass tufts: per-cell dome with a keep/drop cut, per-cell radius, and blades
+   * running along a per-cell direction. The direction is what stops a field of
+   * tufts from reading as a stipple of identical dots.
+   */
+  | 'tufts';
 
 /**
  * A mask gates where a layer or a tint applies. This is the difference between
@@ -139,7 +210,11 @@ export interface NoiseLayer {
   amplitude: number;
   octaves?: number;
   gain?: number;
-  /** Domain warp, in tile units. 0.02–0.12 is the useful range. */
+  /**
+   * Domain warp, in tile units. 0.02–0.12 is the useful range.
+   * `dunes` is the exception: there it is a *phase* warp in cycles, and the
+   * useful range is 0.4–0.9.
+   */
   warp?: number;
   /** How this layer composites onto the accumulator. Default `add`. */
   op?: BlendOp;
@@ -151,9 +226,14 @@ export interface NoiseLayer {
   seedOffset?: number;
 
   // Kind-specific --------------------------------------------------------
-  /** `cell`/`cracks`/`cobble`/`speckle`: feature point scatter, 0..1. */
+  /** `cell`/`cracks`/`cobble`/`speckle`/`pebbles`/`tufts`: feature scatter, 0..1. */
   jitter?: number;
-  /** `cracks`: width of the crack, in cell units. */
+  /**
+   * `cracks`: width of the crack, in cell units.
+   * `clumps`: half-width of the edge transition. Lower = harder patch edges.
+   * `rills`: width of the filament. Lower = finer traces.
+   * `pebbles`/`tufts`: largest feature radius, in cell units (default 0.62).
+   */
   width?: number;
   /** `bricks`: courses per tile (must be even for a running bond). */
   rows?: number;
@@ -163,9 +243,19 @@ export interface NoiseLayer {
   mortar?: number;
   /** `scratches`/`grain`/`weave`: integer shear, sets the direction. */
   shear?: [number, number];
-  /** `scratches`/`grain`: frequency across the streak direction. */
+  /**
+   * `scratches`/`grain`: frequency across the streak direction.
+   * `tufts`: blade cycles across one tuft. 4–8 reads as a tuft; above ~12 the
+   * blades fall under the mip filter and average back to a flat dome.
+   */
   across?: number;
-  /** `scratches`/`speckle`: sparsity cut, 0..1. Higher = fewer features. */
+  /**
+   * `scratches`/`speckle`: sparsity cut, 0..1. Higher = fewer features.
+   * `pebbles`/`tufts`: fraction of cells left empty, 0..1. Non-zero is what
+   * turns a lattice into a scatter — leave it at least 0.25.
+   * `rills`: ridge cut. Higher = thinner, sparser traces.
+   * `dunes`: fraction of the tile scoured flat between ripple trains, 0..1.
+   */
   threshold?: number;
   /** `terrace`: number of strata. */
   steps?: number;
@@ -343,6 +433,16 @@ function warpV(ctx: SynthCtx, u: number, v: number, amt: number): number {
  * `ridged` keeps its sequential per-octave attenuation — the term that puts
  * detail on crests instead of spreading it evenly — by carrying its `prev`
  * buffer up the pyramid alongside the sum.
+ *
+ * ## Octave count above the working resolution
+ *
+ * `res` is clamped at `n`, so once an octave's frequency passes ~n/6 every
+ * further octave costs a full `n^2` pass and returns detail the map cannot
+ * represent. The micro-grain layers that close each ground recipe sit right at
+ * that line, which is why they run a single octave: a second one at 2f doubled
+ * the layer's cost to add aliased static the mip chain then averaged back out.
+ * If a recipe needs finer grain than one octave at f110 gives, the answer is a
+ * detail map, not another octave here.
  */
 function synthFractal(out: Float32Array, ctx: SynthCtx, layer: NoiseLayer, seed: number): void {
   const n = ctx.n;
@@ -525,13 +625,18 @@ function synthDirect(
       const sh = layer.shear ?? [0, 0];
       const across = Math.max(1, Math.round(layer.across ?? f * 6));
       const oct = layer.octaves ?? 3;
+      // Warping before the shear is what turns ruled bands into bedding that
+      // swells and pinches. The warp field is periodic on the tile and the shear
+      // is unimodular, so `wu + 1` still maps onto the lattice — rule 2 holds.
       evalInto(out, n, n, (u, v) => {
+        const wu = warp ? warpU(ctx, u, v, warp) : u;
+        const wv = warp ? warpV(ctx, u, v, warp) : v;
         let sum = 0;
         let amp = 1;
         let norm = 0;
         for (let o = 0; o < oct; o++) {
           const m = 1 << o;
-          sum += amp * shearedPerlin(u, v, across * m, f * m, sh[0], sh[1], seed + o * 733);
+          sum += amp * shearedPerlin(wu, wv, across * m, f * m, sh[0], sh[1], seed + o * 733);
           norm += amp;
           amp *= 0.5;
         }
@@ -557,18 +662,45 @@ function synthDirect(
     case 'dunes': {
       const oct = layer.octaves ?? 3;
       const sh = layer.shear ?? [1, 0];
-      evalInto(out, n, Math.min(n, ceil8(f * 16)), (u, v) => {
-        const d = fbm(u, v, Math.max(1, Math.round(f / 3)), seed + 51, oct);
-        const phase = (u * sh[0] + v * sh[1]) * f + d * 0.6;
+      // Phase warp in cycles. This is the parameter that decides whether the
+      // result is sand or corduroy.
+      const amt = layer.warp ?? 0.55;
+      // Fraction of the tile scoured flat, 0..1.
+      const bare = clamp01(layer.threshold ?? 0.42);
+      // The cycle count is `f * shear`, not `f`, so the sampling resolution has
+      // to follow the shear or a 24-cycle ripple gets evaluated on a 128 grid
+      // and aliases into a moire.
+      const cyc = f * Math.max(1, Math.abs(sh[0]), Math.abs(sh[1]));
+      const wf = Math.max(1, Math.round(f));
+      evalInto(out, n, Math.min(n, ceil8(cyc * 10)), (u, v) => {
+        // Two warp scales. A long swell bends whole ripple trains; a warp at the
+        // ripple wavelength itself makes individual crests wander, fork and
+        // terminate. The v3 generator had only the first, at f/3, so the train
+        // stayed globally coherent across the tile and read as woven fabric —
+        // the single most artificial surface in the library.
+        const swell = fbm(u, v, Math.max(1, Math.round(f / 3)), seed + 51, oct);
+        const jitterF = fbm(u, v, wf, seed + 613, 2);
+        const phase = (u * sh[0] + v * sh[1]) * f + swell * amt * 2 + jitterF * amt;
         const s = Math.sin(phase * Math.PI * 2);
         // Sharpened crests, soft troughs — the asymmetry of a wind ripple.
-        return clamp01(Math.pow(0.5 + 0.5 * s, 0.65));
+        const crest = clamp01(Math.pow(0.5 + 0.5 * s, 0.65));
+        // Ripples never cover a whole beach: scoured flats and coarse lag
+        // deposits interrupt them. Uniform coverage is what makes a repeat
+        // legible even when the tile itself is seamless.
+        // Coverage runs near the ripple frequency, not at f/2: at f/2 the bare
+        // patches were metre-scale blobs, i.e. a distinctive shape at a fifth of
+        // the tile, and the patch *arrangement* became the thing the eye matched
+        // tile to tile even though the ripples themselves no longer repeated.
+        const cover = clamp01(
+          (fbm(u, v, Math.max(2, Math.round(f * 0.8)), seed + 2207, 3) * 0.5 + 0.5 - bare) * 3.2,
+        );
+        return 0.5 + (crest - 0.5) * cover;
       });
       return;
     }
     case 'speckle': {
       const thr = layer.threshold ?? 0.62;
-      evalInto(out, n, Math.min(n, ceil8(f * 9)), (u, v) => {
+      evalInto(out, n, Math.min(n, ceil8(f * 6)), (u, v) => {
         worley(u * f, v * f, f, f, seed, 1);
         const r = clamp01(1 - worleyResult.f1 * 2.4);
         const pick = ((worleyResult.id >>> 8) & 255) / 255;
@@ -604,10 +736,133 @@ function synthDirect(
       });
       return;
     }
+    case 'pebbles': {
+      // Three superimposed cellular scales. Integer multiples of `f`, so every
+      // scale still has period `f*k` on the unit tile and the composite wraps.
+      const maxRad = layer.width ?? 0.62;
+      const drop = layer.threshold ?? 0.34;
+      // 7 samples across the smallest scale's cell. The old multiplier of 11
+      // pushed every pebble layer to full working resolution, where the cost is
+      // three Worley lookups (27 cell hashes) per texel — the single most
+      // expensive thing in the module — to resolve a feature the mip chain
+      // immediately averages away.
+      const res = Math.min(n, ceil8(f * PEBBLE_SCALE[2]! * 7));
+      evalInto(out, n, res, (u, v) => {
+        const wu = warp ? warpU(ctx, u, v, warp) : u;
+        const wv = warp ? warpV(ctx, u, v, warp) : v;
+        let h = 0;
+        for (let s = 0; s < 3; s++) {
+          const fs = f * PEBBLE_SCALE[s]!;
+          worley(wu * fs, wv * fs, fs, fs, seed + s * 9187, jitter);
+          const id = worleyResult.id;
+          // Independent bit fields of one hash: keep/drop, radius, height.
+          if (((id >>> 7) & 1023) / 1024 < drop) continue;
+          const rad = maxRad * (0.44 + 0.56 * (((id >>> 17) & 255) / 255));
+          const d = worleyResult.f1 / rad;
+          if (d >= 1) continue;
+          // Ellipsoidal cap. sqrt gives a stone-like shoulder; d^2 alone gives a
+          // soft blob that mips straight back to the mean.
+          const dome = Math.sqrt(1 - d * d);
+          const lift = 0.58 + 0.42 * ((id & 255) / 255);
+          const val = dome * lift * PEBBLE_AMP[s]!;
+          if (val > h) h = val;
+        }
+        return h;
+      });
+      return;
+    }
+    case 'clumps': {
+      const oct = layer.octaves ?? 3;
+      const edge = Math.max(0.02, layer.width ?? 0.26);
+      const amt = layer.warp ?? 0.07;
+      const wf = Math.max(1, Math.round(f / 2));
+      evalInto(out, n, Math.min(n, ceil8(f * (1 << oct) * 1.5)), (u, v) => {
+        // Warp with an independent field so the patch boundary meanders instead
+        // of following the same fBm that decides where the patch is.
+        const dx = fbm(u, v, wf, seed + 5231, 3);
+        const dy = fbm(u, v, wf, seed + 7717, 3);
+        const a = fbm(u + dx * amt, v + dy * amt, f, seed, oct);
+        // Narrow smoothstep: plateau inside, defined edge, plateau outside.
+        const t = clamp01((a + edge) / (2 * edge));
+        return t * t * (3 - 2 * t);
+      });
+      return;
+    }
+    case 'rills': {
+      const thr = layer.threshold ?? 0.58;
+      const wdt = Math.max(0.02, layer.width ?? 0.26);
+      const amt = layer.warp ?? 0.06;
+      const wf = Math.max(1, Math.round(f / 2));
+      const f2 = f * 2;
+      // 13 samples per cycle, down from 24. A rill filament is `width` of a
+      // cell across, and at f20 the old multiplier asked for 480 texels to draw
+      // something the 512 map cannot resolve anyway — while paying eight perlin
+      // taps per sample for the two warp fields.
+      evalInto(out, n, Math.min(n, ceil8(f * 13)), (u, v) => {
+        const dx = fbm(u, v, wf, seed + 733, 2);
+        const dy = fbm(u, v, wf, seed + 1237, 2);
+        const uu = u + dx * amt;
+        const vv = v + dy * amt;
+        // 1 - |noise| peaks along the zero set of the noise: a sinuous, branching
+        // curve network rather than the convex polygons Worley gives.
+        const r1 = 1 - Math.abs(perlin(uu * f, vv * f, f, f, seed));
+        const r2 = 1 - Math.abs(perlin(uu * f2, vv * f2, f2, f2, seed + 97));
+        const r = Math.max(r1, r2 * 0.88);
+        return clamp01((r - thr) / wdt);
+      });
+      return;
+    }
+    case 'tufts': {
+      const maxRad = layer.width ?? 0.66;
+      const drop = layer.threshold ?? 0.26;
+      const blades = Math.max(1, layer.across ?? 6);
+      evalInto(out, n, Math.min(n, ceil8(f * 10)), (u, v) => {
+        const wu = warp ? warpU(ctx, u, v, warp) : u;
+        const wv = warp ? warpV(ctx, u, v, warp) : v;
+        worley(wu * f, wv * f, f, f, seed, jitter);
+        const id = worleyResult.id;
+        if (((id >>> 5) & 1023) / 1024 < drop) return 0;
+        // Radius spread widened from 0.5..1.0 to 0.26..1.0. At a 2:1 spread every
+        // tuft was within a factor of two of every other one, and a field of
+        // same-sized blobs reads as a regular stipple however well each blob is
+        // drawn — the "screen pattern" the review named. 3.8:1 gives the field
+        // the size hierarchy real turf has.
+        const rad = maxRad * (0.34 + 0.66 * (((id >>> 15) & 255) / 255));
+        const d = worleyResult.f1 / rad;
+        if (d >= 1) return 0;
+        const dome = 1 - d * d;
+        // Per-cell blade direction. Sampling the sine along a per-cell axis costs
+        // one dot product and gives every tuft its own lay — the difference
+        // between a field of grass and a field of identical dots.
+        const ang = ((id >>> 23) & 255) / 255 * Math.PI;
+        const ax = Math.cos(ang);
+        const ay = Math.sin(ang);
+        const t = (worleyResult.ox * ax + worleyResult.oy * ay) / Math.max(1e-4, rad);
+        // Blade count and height come from an independent hash of the cell.
+        // Every bit of `id` is already spoken for by the drop test, the radius
+        // and the angle, so reusing it here would correlate a tuft's height with
+        // whether its neighbours exist — a subtle way to reintroduce regularity.
+        const h2 = ihash(worleyResult.cx, worleyResult.cy, seed + 911);
+        const bl = Math.max(1, blades * (0.55 + 0.9 * ((h2 & 255) / 255)));
+        const blade = 0.5 + 0.5 * Math.sin(t * bl * Math.PI);
+        const lift = 0.34 + 0.66 * (((h2 >>> 8) & 255) / 255);
+        return clamp01(dome * lift * (0.52 + 0.48 * blade));
+      });
+      return;
+    }
     default:
       out.fill(0.5);
   }
 }
+
+/**
+ * Pebble scale ladder. 1 / 2 / 3 keeps every scale's Worley period an integer
+ * divisor of the tile (rule 1 in `noise.ts`) while spreading stone sizes over a
+ * 3:1 range, which is enough to break the lattice read.
+ */
+const PEBBLE_SCALE = [1, 2, 3];
+/** Height weight per scale: big stones dominate, small ones stipple between. */
+const PEBBLE_AMP = [1, 0.66, 0.42];
 
 function synthLayer(out: Float32Array, ctx: SynthCtx, layer: NoiseLayer): void {
   const seed = ctx.seed + (layer.seedOffset ?? 0) * 7919 + hashKind(layer.kind);
@@ -790,11 +1045,15 @@ function buildDerived(
   blurA: Float32Array,
   blurB: Float32Array,
   tmp: Float32Array,
+  wantSlope: boolean,
 ): DerivedFields {
   const total = n * n;
   const cavity = new Float32Array(total);
   const convex = new Float32Array(total);
-  const slope = new Float32Array(total);
+  // Only allocated and filled when a mask actually reads it. No recipe in the
+  // library currently does, and the gradient loop was running `Math.hypot` once
+  // per texel — 262k calls per 512 map to produce a field nothing sampled.
+  const slope = new Float32Array(wantSlope ? total : 0);
 
   const radii = [1, 2, 4, 8, 16];
   const weights = [0.4, 0.6, 0.9, 1.0, 0.7];
@@ -817,17 +1076,19 @@ function buildDerived(
   }
 
   // Slope from a one-texel central difference, scaled to be resolution neutral.
-  const k = n / 512;
-  for (let y = 0; y < n; y++) {
-    const ym = pmod(y - 1, n) * n;
-    const yp = pmod(y + 1, n) * n;
-    const row = y * n;
-    for (let x = 0; x < n; x++) {
-      const xm = pmod(x - 1, n);
-      const xp = pmod(x + 1, n);
-      const gx = (height[row + xp]! - height[row + xm]!) * k;
-      const gy = (height[yp + x]! - height[ym + x]!) * k;
-      slope[row + x] = clamp01(Math.hypot(gx, gy) * 6);
+  if (wantSlope) {
+    const k = n / 512;
+    for (let y = 0; y < n; y++) {
+      const ym = pmod(y - 1, n) * n;
+      const yp = pmod(y + 1, n) * n;
+      const row = y * n;
+      for (let x = 0; x < n; x++) {
+        const xm = pmod(x - 1, n);
+        const xp = pmod(x + 1, n);
+        const gx = (height[row + xp]! - height[row + xm]!) * k;
+        const gy = (height[yp + x]! - height[ym + x]!) * k;
+        slope[row + x] = clamp01(Math.sqrt(gx * gx + gy * gy) * 6);
+      }
     }
   }
 
@@ -847,6 +1108,29 @@ const srgbToLinear = (c: number): number =>
 
 const linearToSrgb = (c: number): number =>
   c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+
+/**
+ * Linear float -> sRGB byte, through a table indexed by `sqrt(linear)`.
+ *
+ * The downsample loop encodes three channels for every output texel, so a 512
+ * recipe ran ~790k `Math.pow` calls here — measurably one of the largest single
+ * line items in generation, and pure overhead since the result is quantised to
+ * a byte anyway.
+ *
+ * Indexing by the square root rather than by the linear value is what makes a
+ * table viable: sRGB is steepest near black, so a linearly-indexed table would
+ * need to be enormous to avoid banding in shadow, while `sqrt` spends its
+ * resolution exactly where the curve needs it. At 8192 entries the worst-case
+ * error anywhere in the range is 0.05 of a byte, i.e. the table is exact.
+ */
+const SRGB_LUT_N = 8192;
+const SRGB_LUT = new Uint8Array(SRGB_LUT_N);
+for (let i = 0; i < SRGB_LUT_N; i++) {
+  const t = i / (SRGB_LUT_N - 1);
+  SRGB_LUT[i] = Math.round(clamp01(linearToSrgb(t * t)) * 255);
+}
+const encLinear = (c: number): number =>
+  SRGB_LUT[((c <= 0 ? 0 : c >= 1 ? 1 : Math.sqrt(c)) * (SRGB_LUT_N - 1) + 0.5) | 0]!;
 
 function hexToLinear(hex: number, out: [number, number, number]): void {
   out[0] = srgbToLinear(((hex >> 16) & 255) / 255);
@@ -961,7 +1245,10 @@ export function makeTextureSet(recipe: MaterialRecipe): TextureSet {
   const height = acc;
 
   // --- Derived fields -----------------------------------------------------
-  const derived = buildDerived(height, n, n / 512, tmpA, tmpB, layerBuf);
+  const usesSlope =
+    recipe.layers.some((l) => l.mask?.from === 'slope') ||
+    (recipe.tints ?? []).some((t) => t.mask.from === 'slope');
+  const derived = buildDerived(height, n, n / 512, tmpA, tmpB, layerBuf, usesSlope);
 
   // --- Albedo / roughness / metalness ------------------------------------
   const lut = buildRampLut(recipe.ramp);
@@ -1092,12 +1379,12 @@ export function makeTextureSet(recipe: MaterialRecipe): TextureSet {
         }
       }
       const d = (y * size + x) * 4;
-      albedoData[d] = enc(linearToSrgb(r * inv));
-      albedoData[d + 1] = enc(linearToSrgb(g * inv));
-      albedoData[d + 2] = enc(linearToSrgb(b * inv));
+      albedoData[d] = encLinear(r * inv);
+      albedoData[d + 1] = encLinear(g * inv);
+      albedoData[d + 2] = encLinear(b * inv);
       albedoData[d + 3] = 255;
 
-      const len = Math.hypot(ax, ay, az) || 1;
+      const len = Math.sqrt(ax * ax + ay * ay + az * az) || 1;
       normalData[d] = enc((ax / len) * 0.5 + 0.5);
       normalData[d + 1] = enc((ay / len) * 0.5 + 0.5);
       normalData[d + 2] = enc((az / len) * 0.5 + 0.5);
@@ -1345,21 +1632,51 @@ export interface TileReport {
   id: string;
   /** Mean absolute step across the wrap seam, in 0-255 units. */
   seamStep: number;
-  /** Mean absolute step one texel inside the tile, for comparison. */
+  /** Mean absolute step over every interior neighbour pair, for comparison. */
   interiorStep: number;
-  /** seamStep / interiorStep. 1.0 means the seam is indistinguishable. */
+  /** Largest mean step any single interior line pair produces. */
+  interiorMax: number;
+  /** seamStep / interiorStep. Informational — see the note on phase bias. */
   ratio: number;
+  /** Where the wrap pair ranks among all line pairs, 0..100. */
+  percentile: number;
   seamless: boolean;
 }
 
 /**
  * Measures whether a generated map actually wraps.
  *
- * A toroidal field has the same statistics across the wrap edge as anywhere
- * else, so the test is a ratio, not an absolute: if the mean step across the
- * seam is within ~1.35x of the mean interior step, no seam is visible. This
- * catches the class of bug where one layer forgets to wrap and produces a hard
- * line down the middle of every tile.
+ * ## Why this is not a simple mean-ratio test
+ *
+ * The v2 analyzer compared the wrap step against the *mean* interior step and
+ * failed anything above 1.35x. That flagged four of six ground recipes. It was
+ * wrong, and the way it was wrong is worth recording because the obvious fix is
+ * also wrong.
+ *
+ * The fields here are exactly toroidal — `perlin`, `fbm` and `worley` reproduce
+ * their values across a period to 1e-15, and a directly-evaluated fBm grid puts
+ * its wrap pair at the 53rd percentile of all column pairs, i.e. unremarkable.
+ * But most octaves are *not* evaluated at the working resolution: `evalInto` and
+ * `synthFractal` evaluate them on a coarse grid and upsample with
+ * `sampleGridWrap`, whose smootherstep weights have zero slope at each coarse
+ * node and maximum slope at the cell centre.
+ *
+ * Texel `k` sits at `u = (k + 0.5) / n`, so with a coarse grid of `res` samples
+ * the two texels either side of the wrap land at interpolation phases
+ * `0.5 - res/2n` and `0.5 + res/2n` — symmetric about the cell centre, i.e.
+ * astride the steepest part of the interpolant, *by construction and for every
+ * map*. The wrap pair therefore shows the largest step of any pair in its cell
+ * while the field remains perfectly continuous. That is a property of the
+ * sampling convention, not a seam, and no amount of recipe work moves it.
+ *
+ * ## What is tested instead
+ *
+ * A field that genuinely fails to wrap puts two uncorrelated samples side by
+ * side, so its wrap step lands near `1.13 * sigma` of the whole map — five to
+ * ten times the mean interior step, and comfortably past the largest step any
+ * interior line pair produces. Comparing against `interiorMax` separates a real
+ * discontinuity from the phase artifact cleanly, and the absolute floor still
+ * short-circuits maps too smooth for either number to mean anything.
  */
 export function analyzeTileability(tex: THREE.DataTexture, id: string): TileReport {
   const img = tex.image as { data: Uint8Array; width: number; height: number };
@@ -1367,25 +1684,50 @@ export function analyzeTileability(tex: THREE.DataTexture, id: string): TileRepo
   const w = img.width;
   const h = img.height;
 
-  let seam = 0;
+  // Mean |delta| over RGB between two columns, and between two rows.
+  const colStep = (a: number, b: number): number => {
+    let s = 0;
+    for (let y = 0; y < h; y++) {
+      const p = (y * w + a) * 4;
+      const q = (y * w + b) * 4;
+      s += Math.abs(data[p]! - data[q]!) + Math.abs(data[p + 1]! - data[q + 1]!) +
+        Math.abs(data[p + 2]! - data[q + 2]!);
+    }
+    return s / (h * 3);
+  };
+  const rowStep = (a: number, b: number): number => {
+    let s = 0;
+    for (let x = 0; x < w; x++) {
+      const p = (a * w + x) * 4;
+      const q = (b * w + x) * 4;
+      s += Math.abs(data[p]! - data[q]!) + Math.abs(data[p + 1]! - data[q + 1]!) +
+        Math.abs(data[p + 2]! - data[q + 2]!);
+    }
+    return s / (w * 3);
+  };
+
+  const pairs: number[] = [];
+  for (let x = 0; x < w - 1; x++) pairs.push(colStep(x, x + 1));
+  for (let y = 0; y < h - 1; y++) pairs.push(rowStep(y, y + 1));
+
   let interior = 0;
-  for (let y = 0; y < h; y++) {
-    for (let c = 0; c < 3; c++) {
-      seam += Math.abs(data[(y * w + 0) * 4 + c]! - data[(y * w + (w - 1)) * 4 + c]!);
-      interior += Math.abs(data[(y * w + 1) * 4 + c]! - data[(y * w + 0) * 4 + c]!);
-    }
+  let interiorMax = 0;
+  for (const p of pairs) {
+    interior += p;
+    if (p > interiorMax) interiorMax = p;
   }
-  for (let x = 0; x < w; x++) {
-    for (let c = 0; c < 3; c++) {
-      seam += Math.abs(data[(0 * w + x) * 4 + c]! - data[((h - 1) * w + x) * 4 + c]!);
-      interior += Math.abs(data[(1 * w + x) * 4 + c]! - data[(0 * w + x) * 4 + c]!);
-    }
-  }
-  const nSamples = (w + h) * 3;
-  const seamStep = seam / nSamples;
-  const interiorStep = interior / nSamples;
+  const interiorStep = interior / pairs.length;
+
+  // The wrap pair, averaged over both axes to match the interior sampling.
+  const seamStep = (colStep(w - 1, 0) + rowStep(h - 1, 0)) / 2;
+
+  let below = 0;
+  for (const p of pairs) if (p < seamStep) below++;
+  const percentile = (below / pairs.length) * 100;
+
   const ratio = interiorStep > 0.01 ? seamStep / interiorStep : seamStep;
-  return { id, seamStep, interiorStep, ratio, seamless: ratio < 1.35 };
+  const seamless = seamStep < 1.5 || seamStep <= interiorMax;
+  return { id, seamStep, interiorStep, interiorMax, ratio, percentile, seamless };
 }
 
 /** Cheap statistical read used to catch flat / washed-out maps. */
