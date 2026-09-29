@@ -165,6 +165,81 @@ export const MOOD_AMBER_STORM: MoodPreset = {
   },
 };
 
+/**
+ * Lighting settings that belong to characters and to nothing else.
+ *
+ * ## Why this is a settings block and not a fifth light
+ *
+ * The obvious way to lift units off the ground is a rim or back light that only
+ * they receive, and three.js layers look like the tool for it. They are not: in
+ * r180 the renderer collects lights per *scene*, filtered once by
+ * `light.layers.test( camera.layers )` (`WebGLRenderer.projectObject`). There is
+ * no per-object light filtering left in the engine, so any directional light
+ * added here lands on the terrain too — and the terrain grade in this file was
+ * just tuned and must not move. Confirmed by reading the renderer source, not
+ * assumed.
+ *
+ * So the character-only part of the rig lives on the character *materials*
+ * instead, and these are its numbers. They sit here, next to the rig they
+ * complement, because they are lighting decisions: `units/build/character.ts`
+ * only applies them.
+ *
+ * A second constraint shaped the choice. `render/creepBatch.ts` clones each
+ * material and overwrites `onBeforeCompile` for its vertex-animation patch, so
+ * any shader injection made here would silently apply to heroes and vanish on
+ * creeps. Everything below is therefore expressed in plain material properties,
+ * which survive `Material.clone()`.
+ */
+export const CHARACTER_SHADING = {
+  /**
+   * Units see less of the sky IBL than the world does. The environment is the
+   * pipeline's only wide specular source, and on a metal at low roughness it is
+   * what turns a pauldron into a white cut-out. The world keeps 1.0.
+   */
+  envMapIntensity: 0.6,
+  /**
+   * Self-lit floor, as a fraction of the surface's own apparent albedo, added as
+   * emissive. It is the "character never dissolves into the ground" term: it
+   * ignores shadow and AO, so a unit standing in a 13 m cast shadow still has a
+   * value of its own to separate from the shadowed grass behind it.
+   *
+   * Kept different per faction on purpose — heroes should sit above the terrain
+   * value and creeps below it (see the faction colour law in
+   * `units/build/character.ts`), and this is the term that holds that apart in
+   * shade, where the key cannot.
+   */
+  ambientLift: { hero: 0.26, creep: 0.17, boss: 0.2 },
+  /**
+   * Emissive on the `glow` slot, clamped. The catalog asks for 3.2–4.6, which
+   * against a 1.05 bloom threshold produced a bloom disc wider than the head it
+   * was attached to: the Hexwright's skull and the Oracle's face were erased by
+   * their own eyes. A glint should read as a glint.
+   */
+  glowIntensityMax: 1.7,
+  /**
+   * Effective roughness floors by material slot — the roughness a surface has
+   * after the slot multiplier is applied to the map. Physical, not arbitrary: a
+   * face is ~0.7, waxed leather ~0.55, battle plate ~0.5. Polished trim is the
+   * only thing on a character allowed a tight highlight, and even that is far
+   * from a mirror.
+   */
+  roughnessFloor: {
+    flesh: 0.62,
+    cloth: 0.72,
+    leather: 0.55,
+    armor: 0.5,
+    metal: 0.38,
+    glow: 0.5,
+  } as Record<string, number>,
+  /**
+   * Metalness ceiling. A full metal has no diffuse term at all, so its entire
+   * appearance is a reflection of the sky and one directional lobe — which is
+   * why armour read as either white or black and never as its palette colour.
+   * Leaving a little diffuse in is what lets a faction colour survive on plate.
+   */
+  metalnessMax: 0.62,
+} as const;
+
 export class LightRig {
   readonly key: THREE.DirectionalLight;
   readonly rim: THREE.DirectionalLight;

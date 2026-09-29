@@ -14,6 +14,7 @@
 
 import * as THREE from 'three';
 import { materials, type MaterialId } from '@/art/materials';
+import { CHARACTER_SHADING } from '@/render/lighting';
 import type { Bind, Rig } from '../rig/rig';
 import { computeSkinWeights } from '../rig/rig';
 
@@ -239,23 +240,271 @@ export class CharacterBuilder {
 
   private materialFor(slot: SlotName): THREE.MeshStandardMaterial {
     const cfg = this.slotConfig[slot] ?? { material: 'unit.steel' as MaterialId };
+    const faction = factionOf(this.defId);
+    // Living tissue keeps the colour the catalog authored; everything worn or
+    // carried takes the faction's. Without the split the law answers a question
+    // nobody asked: an orc pulled into the hostile hue band is a red orc, and
+    // the whole point of rebuilding the bestiary as recognisable creatures was
+    // that people know what an orc looks like. Skin is species, not allegiance.
+    // Allegiance still reads, because it is carried by the armour, the cloth,
+    // the accent and the glow, which is every surface a creature chose to put
+    // on, plus the value rule that holds whatever the hue does.
+    const palette =
+      slot === 'flesh' ? this.palette : factionPalette(this.palette, faction);
+
     const tintKey = cfg.tint ?? 'primary';
-    const base = tintKey === 'none' ? undefined : this.palette[tintKey];
-    const color =
-      base !== undefined ? compensateTint(shadeHex(base, cfg.shade ?? 1), cfg.material) : undefined;
-    return materials.get(cfg.material, {
+    const base = tintKey === 'none' ? undefined : palette[tintKey];
+    // What the surface should look like on screen, before the map's own mean is
+    // divided out. Untinted slots show the map raw, so their apparent colour is
+    // the map's own average.
+    const apparent = base !== undefined ? shadeHex(base, cfg.shade ?? 1) : undefined;
+    const color = apparent !== undefined ? compensateTint(apparent, cfg.material) : undefined;
+
+    const mat = materials.get(cfg.material, {
       key: `unit:${this.defId}:${slot}`,
       ...(color !== undefined ? { color } : {}),
-      ...(cfg.roughness !== undefined ? { roughness: cfg.roughness } : {}),
-      ...(cfg.metalness !== undefined ? { metalness: cfg.metalness } : {}),
+      roughness: slotRoughness(cfg, slot),
+      metalness: Math.min(cfg.metalness ?? 1, CHARACTER_SHADING.metalnessMax),
       ...(slot === 'glow'
         ? {
-            emissive: this.palette.emissive,
-            emissiveIntensity: cfg.emissiveIntensity ?? 2.4,
+            emissive: palette.emissive,
+            emissiveIntensity: Math.min(
+              cfg.emissiveIntensity ?? 2.4,
+              CHARACTER_SHADING.glowIntensityMax,
+            ),
           }
         : {}),
     });
+
+    // Applied after `get` rather than through `MaterialOverrides`: the cache key
+    // above is unique per character and slot, so this material is never shared
+    // with terrain, props or another unit, and these two properties survive the
+    // `clone()` that CreepBatch does — a shader patch would not.
+    if (mat.userData.unitShading !== true) {
+      mat.userData.unitShading = true;
+      mat.envMapIntensity = CHARACTER_SHADING.envMapIntensity;
+      if (slot !== 'glow') {
+        const lift = CHARACTER_SHADING.ambientLift[faction];
+        const lit = apparent !== undefined ? hexToLinear(apparent) : averageAlbedo(cfg.material);
+        mat.emissive.setRGB(lit[0] * lift, lit[1] * lift, lit[2] * lift, THREE.LinearSRGBColorSpace);
+        mat.emissiveIntensity = 1;
+      }
+    }
+    return mat;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE FACTION COLOUR LAW
+//
+// At 79 px tall — a 1.9 m hero at default play zoom on a 1600x900 canvas — a
+// player cannot read a face, a crest or a weapon. They read a silhouette and a
+// colour. So allegiance has to be carried by hue and value, and it has to be
+// carried by *every* member of a faction, or it is not a law and it teaches the
+// player nothing.
+//
+//   HEROES  cool, and lighter than the ground.
+//           Hue 196°–232° (steel blue through slate), saturation 0.27,
+//           lightness 0.30. Warm brass accents, warm amber glow.
+//
+//   CREEPS  warm, and darker than the ground.
+//           Hue 336°–28° (oxblood through rust), saturation 0.29, lightness
+//           0.20. Pale ash-bone accents, cold violet glow.
+//
+//   BOSS    the creep band, raised: hue 350°–22°, saturation 0.34, lightness
+//           0.30 — same family, more chroma and more value, because a boss is a
+//           landmark and must not read as a creep that happens to be big.
+//
+// Why this pairing and not the reverse. The map is green grass and amber-lit
+// grey stone under a 36° key that throws 13 m shadows, so half of any fight is
+// in shade and the shade is teal (the hemisphere fill is the only light a
+// shadowed surface sees). A cool hero is lighter than both lit and shaded
+// ground, so value carries it; a warm creep is darker than lit ground, and in
+// shade its hue is the complement of the teal it stands in. Each faction gets
+// one cue that works in sun and a different one that works in shade. The
+// reverse assignment — warm heroes, cold creeps — loses the creeps entirely in
+// the shadows, which is where they are most dangerous.
+//
+// This is a *band*, not an override. Each character keeps its relative position
+// inside its faction's hue window, derived from the hue the catalog authored, so
+// re-authoring a palette in `units/catalog.ts` still moves that character —
+// it just cannot leave its faction. Saturation and lightness are clamped into
+// the faction's window, which is what kills the muddy purple-brown-grey the
+// whole cast used to share.
+//
+// Keep it here rather than in the catalog: the law must hold for characters
+// nobody has authored yet, and a rule that has to be remembered at every new
+// palette is a rule that will be broken.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Faction = 'hero' | 'creep' | 'boss';
+
+interface FactionLaw {
+  /** Hue window centre and half-width, degrees. */
+  hue: [number, number];
+  saturation: number;
+  lightness: number;
+  /**
+   * Secondary mass: straps, under-robe, the cloth beneath the plate.
+   *
+   * Nearly desaturated on purpose. A secondary that is only "the primary, a bit
+   * darker" gives a figure one hue over its whole area and it reads as a single
+   * moulded shell; a near-neutral dark reads as a second material, and that is
+   * what makes the faction hue on the primary look chosen rather than sprayed
+   * on.
+   */
+  secondary: { hueShift: number; saturation: number; lightness: number };
+  /** Metal trim and hard accents. */
+  accent: [number, number, number];
+  /** Glow: hue window centre and half-width, then saturation and lightness. */
+  emissive: [number, number, number, number];
+}
+
+// Saturation is the number to be most careful with. The first pass ran heroes at
+// 0.36 and creeps at 0.42 and the cast came back as cyan and fire-engine red —
+// a toy set, not an army. These are the values where the law still reads at
+// 79 px and the figures still look like dyed cloth and stained plate.
+const LAWS: Record<Faction, FactionLaw> = {
+  hero: {
+    hue: [214, 18],
+    saturation: 0.27,
+    lightness: 0.3,
+    secondary: { hueShift: 26, saturation: 0.11, lightness: 0.15 },
+    accent: [41, 0.44, 0.38],
+    emissive: [38, 10, 0.85, 0.58],
+  },
+  creep: {
+    hue: [2, 26],
+    saturation: 0.29,
+    lightness: 0.2,
+    secondary: { hueShift: -20, saturation: 0.13, lightness: 0.11 },
+    accent: [38, 0.1, 0.44],
+    emissive: [282, 14, 0.7, 0.55],
+  },
+  boss: {
+    hue: [6, 16],
+    saturation: 0.34,
+    lightness: 0.3,
+    secondary: { hueShift: -16, saturation: 0.16, lightness: 0.14 },
+    accent: [354, 0.42, 0.32],
+    emissive: [288, 10, 0.74, 0.57],
+  },
+};
+
+/** Character ids are namespaced `hero.` / `creep.` / `boss.` by the catalog. */
+function factionOf(defId: string): Faction {
+  const kind = defId.slice(0, defId.indexOf('.'));
+  return kind === 'hero' || kind === 'boss' ? kind : 'creep';
+}
+
+/**
+ * Maps an authored palette into its faction's window.
+ *
+ * The character's own authored hue sets where inside the band it lands, so the
+ * cast still spreads across the window instead of collapsing onto one colour.
+ */
+function factionPalette(src: Palette, faction: Faction): Palette {
+  const law = LAWS[faction];
+  // Position in the band from the authored hue: a full turn of authored hue
+  // sweeps the band once, so two characters the catalog gave different colours
+  // stay different here.
+  const t = hueOf(src.primary) / 360 - 0.5;
+  const hue = law.hue[0] + t * 2 * law.hue[1];
+  const sec = law.secondary;
+
+  // A hue band alone collapses a faction onto one colour, which is the failure
+  // mode of every "team colour" system: allegiance reads, individuals do not.
+  // The authored lightness is kept as a multiplier on the faction's value, so a
+  // character the catalog painted pale stays the pale one of its faction. That
+  // is what keeps Vesper of the First Light lighter than Talon of the Silent
+  // Grove after both have been pulled into the same blue.
+  const value = 0.8 + 0.4 * lightnessOf(src.primary);
+  const light = law.lightness * value;
+
+  return {
+    primary: hsl(hue, law.saturation, light),
+    secondary: hsl(hue + sec.hueShift, sec.saturation, sec.lightness * value),
+    accent: hsl(law.accent[0], law.accent[1], law.accent[2]),
+    emissive: hsl(
+      law.emissive[0] + (hueOf(src.emissive) / 360 - 0.5) * 2 * law.emissive[1],
+      law.emissive[2],
+      law.emissive[3],
+    ),
+  };
+}
+
+/**
+ * Slot roughness as a multiplier on the map, raised until the map's glossiest
+ * texel still clears the slot's physical floor.
+ *
+ * The catalog authors these as multipliers, and `MeshStandardMaterial` multiplies
+ * them into the roughness map — so a 0.42 "matte-ish plate" against a map whose
+ * floor is 0.18 produced an effective 0.08, which is chrome. Solving against the
+ * recipe's own minimum keeps the catalog's *relative* intent (a 0.32 slot is
+ * still glossier than a 0.55 one) while making the floor absolute.
+ */
+function slotRoughness(cfg: SlotConfig, slot: SlotName): number {
+  const floor = CHARACTER_SHADING.roughnessFloor[slot] ?? 0.5;
+  const recipe = materials.recipe(cfg.material);
+  const needed = floor / Math.max(recipe.roughness.min, 1e-3);
+  // Solved against the recipe's floor, not against its glossiest polished tint:
+  // a tint that only touches convex crowns should not drag the whole surface to
+  // matte. The 1.8 ceiling is what `structure.gold` needs — the hero trim
+  // material, which the catalog asks for at 0.24–0.34 and whose own floor is
+  // 0.16, so without this the trim was still a mirror.
+  return Math.min(Math.max(cfg.roughness ?? 1, needed), 1.8);
+}
+
+// ── Colour helpers ───────────────────────────────────────────────────────────
+
+/** Hue of an sRGB hex, degrees. Returns 0 for greys. */
+function hueOf(hex: number): number {
+  const r = ((hex >> 16) & 0xff) / 255;
+  const g = ((hex >> 8) & 0xff) / 255;
+  const b = (hex & 0xff) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d < 1e-6) return 0;
+  let h: number;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h *= 60;
+  return h < 0 ? h + 360 : h;
+}
+
+/** HSL to sRGB hex. Hue in degrees, wrapped. */
+function hsl(h: number, s: number, l: number): number {
+  const hh = (((h % 360) + 360) % 360) / 60;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((hh % 2) - 1));
+  const m = l - c / 2;
+  let rgb: [number, number, number];
+  if (hh < 1) rgb = [c, x, 0];
+  else if (hh < 2) rgb = [x, c, 0];
+  else if (hh < 3) rgb = [0, c, x];
+  else if (hh < 4) rgb = [0, x, c];
+  else if (hh < 5) rgb = [x, 0, c];
+  else rgb = [c, 0, x];
+  const to = (v: number) => Math.max(0, Math.min(255, Math.round((v + m) * 255)));
+  return (to(rgb[0]) << 16) | (to(rgb[1]) << 8) | to(rgb[2]);
+}
+
+/** HSL lightness of an sRGB hex, 0..1. */
+function lightnessOf(hex: number): number {
+  const r = ((hex >> 16) & 0xff) / 255;
+  const g = ((hex >> 8) & 0xff) / 255;
+  const b = (hex & 0xff) / 255;
+  return (Math.max(r, g, b) + Math.min(r, g, b)) / 2;
+}
+
+function hexToLinear(hex: number): [number, number, number] {
+  return [
+    srgbToLinear(((hex >> 16) & 0xff) / 255),
+    srgbToLinear(((hex >> 8) & 0xff) / 255),
+    srgbToLinear((hex & 0xff) / 255),
+  ];
 }
 
 function pushVertex(

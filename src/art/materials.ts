@@ -1145,46 +1145,112 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
   // -------------------------------------------------------------------------
   // Units
   // -------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Units — the two rules these recipes are built to
+  //
+  // 1. THE MAP CARRIES VALUE AND TEXTURE. THE PALETTE CARRIES HUE.
+  //    `compensateTint` in units/build/character.ts solves tint = target ÷ map
+  //    mean and clamps at white, so a palette colour brighter than the map's own
+  //    mean in any channel is simply unreachable — the surface silently keeps the
+  //    map's hue and the catalog's palette is inert. Measured, the old maps sat
+  //    at a mean linear albedo of 0.04 (cloth), 0.03 (leather) and 0.05 (chitin):
+  //    every mid-tone palette entry in the game clamped, which is why every robe
+  //    in the cast rendered the same dusty violet whatever its palette said, and
+  //    why hero armour tinted `accent` gold came out blue-grey. These recipes are
+  //    now near-neutral and sit at a mean the palettes can actually reach.
+  //
+  // 2. NOTHING ON A CHARACTER MAY CLIP UNDER THE KEY. The rig runs an 8.2
+  //    intensity key at exposure 1.64 with a highlight shoulder over it, so a
+  //    fully lit surface clips at roughly 0.25 linear albedo. Bone peaked at
+  //    0.53 and skin at 0.25 — which is exactly why heads and bone masses came
+  //    back as featureless white blobs, the single worst legibility defect in
+  //    the cast. Untinted slots (`flesh` on every hero, `leather` and `metal` on
+  //    some creeps) show the map raw, so their peaks are capped here; slots that
+  //    are always tinted can sit brighter, because the palette brings them down.
+  // ---------------------------------------------------------------------------
   'unit.cloth': {
     id: 'unit.cloth',
     size: 256,
     seed: 14011,
+    // Neutral, and light enough that a palette can take it anywhere. The violet
+    // it used to be was not a choice the art direction could override: it was
+    // below every target, so the tint clamped and the violet survived.
     ramp: [
-      { stop: 0.0, color: 0x201b2c },
-      { stop: 0.45, color: 0x342c46 },
-      { stop: 0.8, color: 0x483c5f },
-      { stop: 1.0, color: 0x5d4f76 },
+      { stop: 0.0, color: 0x46444a },
+      { stop: 0.45, color: 0x666369 },
+      { stop: 0.8, color: 0x807d84 },
+      { stop: 1.0, color: 0x96929a },
     ],
     layers: [
-      // 26 threads over 256px is ~10px per thread, which survives mipping. The
-      // migrated 90x90 was under 3px per thread: below the filter's resolving
-      // power, so it averaged to flat grey at any real viewing distance.
-      { kind: 'weave', frequency: 26, across: 26, amplitude: 1 },
-      // Folds and drape at a much larger scale than the weave.
-      { kind: 'fbm', frequency: 5, amplitude: 0.5, octaves: 4, warp: 0.09, op: 'overlay' },
+      // DRAPE IS THE PRIMARY, NOT THE WEAVE.
+      //
+      // The weave used to be the amplitude-1 base layer with the folds an
+      // overlay at 0.5, which means the entire value range of the surface was
+      // one regular lattice. At play zoom a robe is about 50 px across and that
+      // lattice landed at 3–5 px a cell, so every hero in a robe wore a visible
+      // quilted grid — the most obviously synthetic thing left on a character.
+      // A lattice cannot be rescued by retuning its frequency: at any size it is
+      // a repeating grid, and the only question is whether it aliases or reads.
+      //
+      // What a viewer actually sees on cloth at 25 m is drape: soft folds
+      // running with gravity. So the fBm and a directional flow carry the range
+      // now, and the weave is a fine modulation on top at a quarter amplitude.
+      { kind: 'fbm', frequency: 5, amplitude: 1, octaves: 4, warp: 0.1 },
+      // Hanging folds. `flow` is sinuous and anisotropic, so it gives the
+      // surface a direction without giving it a period to recognise.
+      { kind: 'flow', frequency: 7, amplitude: 0.55, octaves: 4, warp: 0.26, op: 'overlay' },
+      // The weave itself: doubled in frequency and cut to a quarter amplitude,
+      // so it survives as a tooth on the fabric instead of a quilt over it.
+      { kind: 'weave', frequency: 52, across: 52, amplitude: 0.26, op: 'overlay' },
       { kind: 'fbm', frequency: 60, amplitude: 0.16, octaves: 3 },
     ],
     tints: [
-      { color: 0x140f1c, mask: { from: 'cavity', low: 0.26, high: 0.76 }, strength: 0.65 },
-      // Sheen on the raised threads — cloth's whole specular identity.
-      { color: 0x7a6b96, mask: { from: 'convex', low: 0.32, high: 0.82 }, strength: 0.45, roughness: 0.62 },
+      // Neutral in the MEAN, not in every texel: the shadowed weave goes a
+      // little cool and the sheen a little warm, which is what keeps a tinted
+      // surface reading as dyed cloth rather than as flat plastic. Hue variation
+      // this small survives the palette multiply without fighting it.
+      { color: 0x1d2130, mask: { from: 'cavity', low: 0.26, high: 0.76 }, strength: 0.7 },
+      // Sheen on the crowns of the folds — cloth's whole specular identity.
+      // Pulled back in gloss, pushed apart in hue: at 0.62 roughness the crowns
+      // returned a hard specular line rather than a sheen.
+      { color: 0xa79285, mask: { from: 'convex', low: 0.32, high: 0.82 }, strength: 0.34, roughness: 0.78 },
+      // Uneven dye take at about a third of the garment. The palette multiplies
+      // this, so it survives as a warm/cool wander through whatever hue the
+      // faction law hands down — which is what separates dyed cloth from a
+      // plastic shell tinted in one flat value.
       {
-        color: 0x3a3348,
-        mask: { from: 'noise', noise: { frequency: 4, octaves: 3, seed: 13 }, low: 0.5, high: 0.85 },
-        strength: 0.3,
+        color: 0x6b6156,
+        mask: { from: 'noise', noise: { frequency: 4, octaves: 3, seed: 13 }, low: 0.46, high: 0.84 },
+        strength: 0.38,
       },
     ],
-    roughness: { min: 0.68, max: 0.95 },
+    // Cloth is the roughest thing a character wears. 0.68 let the weave return a
+    // visible specular lobe from the key, which at 79 px reads as glare, not as
+    // fabric.
+    roughness: { min: 0.76, max: 1.0 },
     roughnessBreakup: { frequency: 12, octaves: 3, amount: 0.08 },
-    normalStrength: 1.3,
+    // With the lattice gone the fold field owns the whole range, and fBm on its
+    // own does not use the ends of a ramp. This is what turns the drape from a
+    // faint mottle into readable folds.
+    contrast: 1.3,
+    // 1.3 was carving the weave lattice into the shading with per-pixel relief
+    // at a scale the screen could not resolve, which is half of why the grid
+    // read so hard. Drape wants a soft normal.
+    normalStrength: 0.8,
     aoStrength: 1.15,
     bakedCavity: 0.28,
+    // Close-range fabric tooth. This used to be a second weave lattice at four
+    // times the base rate — 120 threads per base repeat, far under one screen
+    // pixel at any play zoom, so it contributed shimmer and nothing else.
     detail: detail({
-      scale: 4,
-      layers: [{ kind: 'weave', frequency: 30, across: 30, amplitude: 1 }],
-      normalStrength: 0.9,
-      albedoAmount: 0.22,
-      roughAmount: 0.2,
+      scale: 5,
+      layers: [
+        { kind: 'fbm', frequency: 22, amplitude: 1, octaves: 3 },
+        { kind: 'weave', frequency: 18, across: 18, amplitude: 0.45, op: 'overlay' },
+      ],
+      normalStrength: 0.45,
+      albedoAmount: 0.13,
+      roughAmount: 0.18,
     }),
   },
 
@@ -1192,11 +1258,15 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     id: 'unit.leather',
     size: 256,
     seed: 15013,
+    // Worn on three characters with `tint: 'none'`, so this map is seen raw and
+    // has to read as leather on its own — but it was so dark (mean linear 0.03)
+    // that the characters which DO tint it got no colour at all. Lifted to a mid
+    // tan and desaturated enough for a palette to steer it.
     ramp: [
-      { stop: 0.0, color: 0x231910 },
-      { stop: 0.45, color: 0x3b2a1c },
-      { stop: 0.8, color: 0x523a28 },
-      { stop: 1.0, color: 0x6a4d35 },
+      { stop: 0.0, color: 0x342a21 },
+      { stop: 0.45, color: 0x4e4234 },
+      { stop: 0.8, color: 0x665748 },
+      { stop: 1.0, color: 0x7c6b59 },
     ],
     layers: [
       // Pebbled hide grain.
@@ -1206,11 +1276,13 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
       { kind: 'fbm', frequency: 80, amplitude: 0.18, octaves: 3 },
     ],
     tints: [
-      { color: 0x120c07, mask: { from: 'cavity', low: 0.24, high: 0.74 }, strength: 0.8 },
+      { color: 0x191a1c, mask: { from: 'cavity', low: 0.24, high: 0.74 }, strength: 0.8 },
       // Worn, polished high points — leather's characteristic uneven sheen.
-      { color: 0x8a6845, mask: { from: 'convex', low: 0.32, high: 0.82 }, strength: 0.5, roughness: 0.38 },
+      // 0.38 roughness on a belt facing the sun was a mirror; real waxed leather
+      // scatters its highlight over most of a hemisphere.
+      { color: 0x9c7f5c, mask: { from: 'convex', low: 0.32, high: 0.82 }, strength: 0.46, roughness: 0.62 },
     ],
-    roughness: { min: 0.46, max: 0.84 },
+    roughness: { min: 0.58, max: 0.92 },
     roughnessBreakup: { frequency: 14, octaves: 3, amount: 0.12 },
     normalStrength: 1.9,
     aoStrength: 1.25,
@@ -1231,11 +1303,15 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     id: 'unit.steel',
     size: 256,
     seed: 16007,
+    // Near-neutral and a stop lighter. Every hero's `armor` slot is this map
+    // tinted `primary` or `accent`; at the old mean (linear 0.075 red) a gold
+    // accent clamped to white and the plate came back the map's own blue-grey,
+    // so three of the four heroes were wearing the same armour colour.
     ramp: [
-      { stop: 0.0, color: 0x282d34 },
-      { stop: 0.45, color: 0x474f5a },
-      { stop: 0.8, color: 0x687381 },
-      { stop: 1.0, color: 0x8c97a3 },
+      { stop: 0.0, color: 0x37383c },
+      { stop: 0.45, color: 0x55575d },
+      { stop: 0.8, color: 0x74767d },
+      { stop: 1.0, color: 0x91939a },
     ],
     layers: [
       { kind: 'fbm', frequency: 8, amplitude: 1, octaves: 4, warp: 0.04 },
@@ -1246,17 +1322,24 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
       { kind: 'fbm', frequency: 88, amplitude: 0.14, octaves: 3 },
     ],
     tints: [
-      { color: 0x14181d, mask: { from: 'cavity', low: 0.24, high: 0.74 }, strength: 0.6, roughness: 0.66 },
+      { color: 0x151924, mask: { from: 'cavity', low: 0.24, high: 0.74 }, strength: 0.65, roughness: 0.8 },
       {
-        color: 0x5d3418,
+        color: 0x63432c,
         mask: { from: 'noise', noise: { frequency: 6, octaves: 4, warp: 0.1, seed: 14 }, low: 0.72, high: 0.95 },
         strength: 0.45,
-        roughness: 0.92,
+        roughness: 0.94,
         metalness: 0.0,
       },
-      { color: 0xb3bdc9, mask: { from: 'convex', low: 0.34, high: 0.86 }, strength: 0.55, roughness: 0.12 },
+      // Burnished edges. At roughness 0.12 this was the worst offender in the
+      // cast: a near-mirror on every convex edge of every plate, which under a
+      // key this bright returns a blown-white streak wider than the edge that
+      // made it. Polished, not mirrored, keeps the edge reading as an edge.
+      { color: 0xb4a898, mask: { from: 'convex', low: 0.34, high: 0.86 }, strength: 0.42, roughness: 0.42 },
     ],
-    roughness: { min: 0.18, max: 0.5 },
+    // Armour is plate, not chrome. The old floor of 0.18, multiplied by the
+    // catalog's own 0.32–0.45 slot multipliers, gave an effective roughness near
+    // 0.06 under a key bright enough to light a whole valley.
+    roughness: { min: 0.4, max: 0.72 },
     roughnessBreakup: { frequency: 20, octaves: 3, amount: 0.1 },
     metalness: 1,
     normalStrength: 1.2,
@@ -1277,11 +1360,17 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     id: 'unit.skin',
     size: 256,
     seed: 17011,
+    // Every hero's head is this map with `tint: 'none'`, so nothing downstream
+    // can rescue it: what is authored here is what the sun hits. At a peak of
+    // 0xb08466 (0.25 linear) a lit face landed above the clip point and the head
+    // — the number one identity cue on a character — came back as a white blob.
+    // Halved. A face should sit in the middle of the histogram, not at the top
+    // of it, and the shading gradient across a skull is what makes it a head.
     ramp: [
-      { stop: 0.0, color: 0x5a3c2c },
-      { stop: 0.4, color: 0x7a553d },
-      { stop: 0.75, color: 0x966b4e },
-      { stop: 1.0, color: 0xb08466 },
+      { stop: 0.0, color: 0x412d22 },
+      { stop: 0.4, color: 0x57402f },
+      { stop: 0.75, color: 0x6b4f3b },
+      { stop: 1.0, color: 0x805f47 },
     ],
     layers: [
       { kind: 'fbm', frequency: 6, amplitude: 1, octaves: 4, warp: 0.06 },
@@ -1292,30 +1381,47 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     ],
     tints: [
       // Subsurface warmth in the creases — skin's shadows go red, not grey.
-      { color: 0x7d3a2c, mask: { from: 'cavity', low: 0.3, high: 0.8 }, strength: 0.45 },
-      { color: 0xc49a78, mask: { from: 'convex', low: 0.34, high: 0.84 }, strength: 0.4, roughness: 0.44 },
+      { color: 0x50251c, mask: { from: 'cavity', low: 0.3, high: 0.8 }, strength: 0.58 },
+      // Cheekbones and brow. 0.44 roughness put a wet gloss on a forehead; skin
+      // is a rough dielectric and its highlight is broad and dim.
+      { color: 0x8f6a50, mask: { from: 'convex', low: 0.34, high: 0.84 }, strength: 0.34, roughness: 0.72 },
       {
-        color: 0x6b5240,
+        color: 0x574234,
         mask: { from: 'noise', noise: { frequency: 5, octaves: 3, seed: 15 }, low: 0.55, high: 0.88 },
         strength: 0.3,
       },
     ],
-    roughness: { min: 0.5, max: 0.76 },
+    // A face is roughness ~0.7. Nothing about skin justifies a tight highlight.
+    roughness: { min: 0.64, max: 0.9 },
     roughnessBreakup: { frequency: 16, octaves: 3, amount: 0.1 },
-    normalStrength: 0.9,
-    aoStrength: 0.95,
-    bakedCavity: 0.22,
+    // A head is about 15 px at play zoom, so anything a material can contribute
+    // to reading it as a head has to be low frequency. The crease, cavity and
+    // normal terms are pushed here so whatever brow, socket and jaw the mesh
+    // does have takes a visible value break instead of averaging into one flat
+    // oval. This is a partial fix by construction: a face needs geometry, and
+    // the head mesh lives in the body builder, which this workstream does not
+    // own.
+    contrast: 1.35,
+    normalStrength: 1.15,
+    aoStrength: 1.15,
+    bakedCavity: 0.3,
   },
 
   'unit.bone': {
     id: 'unit.bone',
     size: 256,
     seed: 18013,
+    // Bone peaked at 0.53 linear — by a wide margin the brightest albedo on any
+    // character, and roughly twice the value at which a lit surface clips under
+    // this key. The Marrow Titan's fused masses and the Hexwright's skull read
+    // as flat white cut-outs because of it: 39% of the Titan's head crop sat
+    // above 90% luma. Dropped to a bone that is off-white in shade and
+    // mid-value in sun, which is what bone actually looks like outdoors.
     ramp: [
-      { stop: 0.0, color: 0x5f5a4c },
-      { stop: 0.4, color: 0x847d68 },
-      { stop: 0.75, color: 0xa79f86 },
-      { stop: 1.0, color: 0xcdc4a8 },
+      { stop: 0.0, color: 0x4b473d },
+      { stop: 0.4, color: 0x655f51 },
+      { stop: 0.75, color: 0x7e7767 },
+      { stop: 1.0, color: 0x968d78 },
     ],
     layers: [
       { kind: 'fbm', frequency: 6, amplitude: 1, octaves: 4, warp: 0.05 },
@@ -1326,10 +1432,10 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     ],
     tints: [
       // Old bone stains in its cracks; clean bone in the cracks reads as plastic.
-      { color: 0x453d2c, mask: { from: 'cavity', low: 0.22, high: 0.72 }, strength: 0.8 },
-      { color: 0xe4dcc0, mask: { from: 'convex', low: 0.34, high: 0.84 }, strength: 0.45, roughness: 0.38 },
+      { color: 0x32302c, mask: { from: 'cavity', low: 0.22, high: 0.72 }, strength: 0.82 },
+      { color: 0xafa287, mask: { from: 'convex', low: 0.34, high: 0.84 }, strength: 0.44, roughness: 0.66 },
     ],
-    roughness: { min: 0.4, max: 0.76 },
+    roughness: { min: 0.56, max: 0.9 },
     roughnessBreakup: { frequency: 15, octaves: 3, amount: 0.1 },
     normalStrength: 1.6,
     aoStrength: 1.25,
@@ -1340,11 +1446,17 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
     id: 'unit.chitin',
     size: 256,
     seed: 19001,
+    // Carapace on three of the five creeps, always tinted `primary` — so this
+    // ramp's job is value and plate structure, not colour. At a mean of 0.05
+    // linear it was below every palette entry, the tint clamped, and all three
+    // wore the same blue-black whatever the catalog asked for. Neutral and
+    // mid-dark: dark enough that a creep still reads as a mass, light enough
+    // that the faction hue survives the multiply.
     ramp: [
-      { stop: 0.0, color: 0x0f1219 },
-      { stop: 0.4, color: 0x1e2531 },
-      { stop: 0.75, color: 0x323d4e },
-      { stop: 1.0, color: 0x4a5a70 },
+      { stop: 0.0, color: 0x2b2c2f },
+      { stop: 0.4, color: 0x414347 },
+      { stop: 0.75, color: 0x595c61 },
+      { stop: 1.0, color: 0x74777d },
     ],
     layers: [
       // Overlapping plates.
@@ -1354,14 +1466,18 @@ const RECIPES: Record<MaterialId, MaterialRecipe> = {
       { kind: 'fbm', frequency: 92, amplitude: 0.14, octaves: 3 },
     ],
     tints: [
-      { color: 0x070a0e, mask: { from: 'cavity', low: 0.2, high: 0.7 }, strength: 0.85 },
-      // Iridescent highlight on the plate crowns: the one saturated accent on an
-      // otherwise near-black material, so enemies still read against dark ground.
-      { color: 0x4d7fa8, mask: { from: 'convex', low: 0.36, high: 0.86 }, strength: 0.5, roughness: 0.16 },
+      { color: 0x10141d, mask: { from: 'cavity', low: 0.2, high: 0.7 }, strength: 0.85 },
+      // Waxy sheen on the plate crowns. It used to be a saturated blue at
+      // roughness 0.16, which fought the faction hue on every creep that wears
+      // it and returned a hard cold glint besides. Neutral and only half as
+      // glossy: the chroma is the palette's job now.
+      { color: 0x9d9082, mask: { from: 'convex', low: 0.36, high: 0.86 }, strength: 0.46, roughness: 0.46 },
     ],
-    roughness: { min: 0.18, max: 0.52 },
+    roughness: { min: 0.38, max: 0.74 },
     roughnessBreakup: { frequency: 17, octaves: 3, amount: 0.1 },
-    metalness: 0.15,
+    // Chitin is not a metal. The 0.15 it carried was enough for the sky IBL to
+    // lay a cold reflection over every creep, against the warm faction law.
+    metalness: 0.06,
     normalStrength: 2.4,
     aoStrength: 1.35,
     bakedCavity: 0.3,
