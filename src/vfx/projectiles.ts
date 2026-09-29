@@ -48,6 +48,9 @@ interface Shot {
   vz: number;
   color: [number, number, number];
   trailColor: [number, number, number];
+  haloColor: [number, number, number];
+  /** Set once the herald has been fired, so it cannot fire again. */
+  heralded: boolean;
 }
 
 function blankShot(): Shot {
@@ -73,6 +76,8 @@ function blankShot(): Shot {
     vz: 0,
     color: [1, 1, 1],
     trailColor: [1, 1, 1],
+    haloColor: [1, 1, 1],
+    heralded: false,
   };
 }
 
@@ -133,6 +138,13 @@ export class ProjectileSystem {
     shot.vz = 0;
     shot.color = linearOf(spec.color);
     shot.trailColor = linearOf(spec.colorTrail);
+    shot.haloColor = spec.halo ? linearOf(spec.halo.color) : shot.color;
+    shot.heralded = false;
+
+    // A shot that appears out of nothing has no author. The muzzle is fired at
+    // the launch point, not carried by the projectile, so it stays put while the
+    // bolt leaves — which is what reads as the caster having thrown it.
+    if (spec.muzzle) this.onImpact(spec.muzzle, x0, z0, 1);
   }
 
   private acquire(): Shot {
@@ -220,6 +232,15 @@ export class ProjectileSystem {
         );
       }
 
+      // The ground reacting before the thing arrives. Fired once, part-way
+      // down, at the *landing* point rather than at the shot — it is the
+      // anticipation for an impact that would otherwise have none, because the
+      // impact effect only plays on the frame the projectile touches down.
+      if (spec.herald && !shot.heralded && shot.u >= (spec.heraldAt ?? 0.7)) {
+        shot.heralded = true;
+        this.onImpact(spec.herald, shot.x1, shot.z1, 1.6);
+      }
+
       if (landed) {
         shot.active = false;
         this.onImpact(spec.impact, shot.x1, shot.z1, 1.4);
@@ -228,6 +249,28 @@ export class ProjectileSystem {
 
       // Head. Fades in over the first metre so it does not pop out of the caster.
       const emerge = Math.min(1, (shot.u * shot.length) / 0.8);
+      // Envelope first: it has to be behind the core in the additive batch so
+      // the core still reads as the hot centre of a shape rather than as a
+      // brighter patch of the same haze.
+      const halo = spec.halo;
+      if (halo) {
+        this.particles.glow.push(
+          shot.x,
+          shot.y,
+          shot.z,
+          halo.size,
+          -shot.rot * 0.6,
+          shot.haloColor[0] * halo.intensity,
+          shot.haloColor[1] * halo.intensity,
+          shot.haloColor[2] * halo.intensity,
+          emerge,
+          halo.layer ?? spec.layer,
+          shot.vx,
+          shot.vy,
+          shot.vz,
+          halo.stretch ?? 0,
+        );
+      }
       this.particles.glow.push(
         shot.x,
         shot.y,

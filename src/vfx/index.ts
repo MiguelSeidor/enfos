@@ -46,7 +46,8 @@ import { GroundBatch, GSHAPE } from './ground';
 import { BeamSystem } from './beams';
 import { ProjectileSystem } from './projectiles';
 import { linearOf, ParticleSystem } from './quads';
-import { makeDecalArray, makeHeightField, makeSpriteArray, DECAL } from './sprites';
+import { makeDecalArray, makeHeightField, makeSpriteArray, DECAL, SPRITE } from './sprites';
+import type { BurstSpec } from './quads';
 import {
   BEAMS,
   curveAt,
@@ -54,6 +55,8 @@ import {
   EFFECTS,
   PROJECTILES,
   type GroundShapeSpec,
+  type ResidueSpec,
+  type ShakeSpec,
 } from './specs';
 
 /** Pool sizes. Sized for a boss nova landing while forty creeps trade blows. */
@@ -76,6 +79,52 @@ const CULL_DISTANCE = 130;
 const FX_SHAPE = 0;
 const FX_TELEGRAPH = 1;
 const FX_DECAL = 2;
+
+/**
+ * Scheduled layers. An effect is no longer one instant — it is a wind-up, a beat
+ * and a residue (see the three-beats note in `specs.ts`), and something has to
+ * hold the layers that have not happened yet.
+ *
+ * Sized for a boss nova, two ultimates and a volley of arrows overlapping: the
+ * heaviest single effect in the table books fourteen entries.
+ */
+const PENDING_MAX = 192;
+
+const PEND_SHAPE = 0;
+const PEND_BURST = 1;
+const PEND_DECAL = 2;
+const PEND_SHAKE = 3;
+
+interface Pending {
+  active: boolean;
+  wait: number;
+  kind: number;
+  /** Exactly one of these is set, by `kind`. All are module constants, never mutated. */
+  shape: GroundShapeSpec | null;
+  burst: BurstSpec | null;
+  residue: ResidueSpec | null;
+  shakeIntensity: number;
+  shakeDuration: number;
+  x: number;
+  z: number;
+  scale: number;
+}
+
+function blankPending(): Pending {
+  return {
+    active: false,
+    wait: 0,
+    kind: PEND_SHAPE,
+    shape: null,
+    burst: null,
+    residue: null,
+    shakeIntensity: 0,
+    shakeDuration: 0,
+    x: 0,
+    z: 0,
+    scale: 1,
+  };
+}
 
 interface GroundFx {
   active: boolean;
@@ -165,6 +214,31 @@ const SHOT_BY_TYPE: Record<string, string> = {
 /** Beyond this reach a landed hit must have been fired from range. */
 const RANGED_HIT_DISTANCE = 4.5;
 
+/**
+ * Motes drawn into the centre of a boss telegraph as its lead time runs out.
+ * Authored here rather than in `specs.ts` because it belongs to the telegraph
+ * mechanism, which is code, not to any one effect.
+ */
+const BOSS_WARN: BurstSpec = {
+  count: 14,
+  layer: SPRITE.ember,
+  ring: 0.9,
+  ringJitter: 0.35,
+  y: 0.2,
+  yJitter: 1.2,
+  converge: true,
+  swirl: [1, 2.4],
+  rise: [0.4, 1.6],
+  size: [0.16, 0.34],
+  sizeEnd: 0.5,
+  life: [0.42, 0.48],
+  color: 0xff6a3c,
+  intensity: 0.85,
+  intensityEnd: 1.9,
+  fadeIn: 0.22,
+  decay: 0.7,
+};
+
 export class VfxModule implements GameModule {
   readonly id = 'vfx';
   readonly order = 810;
@@ -183,6 +257,8 @@ export class VfxModule implements GameModule {
   private shots!: ProjectileSystem;
 
   private readonly fx: GroundFx[] = [];
+  private readonly pending: Pending[] = [];
+  private pendingCursor = 0;
   private time = 0;
 
   /** Lazily resolved: registered at order 900, after this module inits. */
@@ -239,6 +315,7 @@ export class VfxModule implements GameModule {
     );
 
     for (let i = 0; i < GROUND_LIGHT + GROUND_DECAL; i++) this.fx.push(blankFx());
+    for (let i = 0; i < PENDING_MAX; i++) this.pending.push(blankPending());
 
     const service: VfxService = {
       spawn: (vfxId, pos, opts) => this.play(vfxId, pos.x, pos.z, opts?.scale ?? 1),
@@ -258,9 +335,15 @@ export class VfxModule implements GameModule {
     // that produces no visual is the single loudest complaint in a combat review.
     ctx.bus.on('unit:damage', (e) => this.onDamage(e));
     ctx.bus.on('unit:death', ({ pos }) => this.play('hit.physical', pos.x, pos.z, 1.4));
-    ctx.bus.on('boss:telegraph', ({ pos, leadTime }) =>
-      this.spawnTelegraph('circle', pos, 7, leadTime, 0xff5a3c),
-    );
+    ctx.bus.on('boss:telegraph', ({ pos, leadTime }) => {
+      this.spawnTelegraph('circle', pos, 7, leadTime, 0xff5a3c);
+      // The circle says *where*. The gather says *now*: it is armed so that its
+      // ring closes onto the point over the last third of the lead time, which
+      // is the part a player reacts to.
+      const warn = Math.min(0.5, leadTime * 0.34);
+      const p = this.later(Math.max(0, leadTime - warn), PEND_BURST, pos.x, pos.z, 7);
+      p.burst = BOSS_WARN;
+    });
     ctx.bus.on('vfx:request', ({ vfxId, pos, scale }) =>
       this.play(vfxId, pos.x, pos.z, scale ?? 1),
     );
@@ -291,7 +374,17 @@ export class VfxModule implements GameModule {
 
   // ── Playback ───────────────────────────────────────────────────────────────
 
-  /** Fires a full effect: ground shapes, particle bursts, residue and shake. */
+  /**
+   * Fires a full effect: ground shapes, particle bursts, residue and shake.
+   *
+   * Each layer carries an optional `at`, in seconds, and anything with one is
+   * booked rather than played. That is the whole anticipation mechanism — the
+   * same call site now produces a wind-up, a beat and a residue in sequence
+   * instead of everything landing on one frame.
+   *
+   * Culling is decided once, here, against the effect's origin. A layer that was
+   * worth playing at t=0 is worth finishing.
+   */
   private play(vfxId: DefId, x: number, z: number, scale: number): void {
     // Replaying missed turns: effects for events long past would only flood the pools.
     if (playback.fastForward) return;
@@ -303,19 +396,112 @@ export class VfxModule implements GameModule {
     const groundY = this.terrain.heightAt(x, z);
 
     if (spec.ground) {
-      for (const shape of spec.ground) this.armShape(shape, x, z, s);
+      for (const shape of spec.ground) {
+        if (shape.at) this.later(shape.at, PEND_SHAPE, x, z, s).shape = shape;
+        else this.armShape(shape, x, z, s);
+      }
     }
     if (spec.bursts) {
       for (const burst of spec.bursts) {
-        this.particles.burst(burst, x, groundY, z, s, visualRng.next() * Math.PI * 2);
+        if (burst.at) this.later(burst.at, PEND_BURST, x, z, s).burst = burst;
+        else this.particles.burst(burst, x, groundY, z, s, visualRng.next() * Math.PI * 2);
       }
     }
     if (spec.residue) {
-      const res = spec.residue;
-      this.armDecal(res.layer, x, z, s * res.size, res.life, res.alpha, res.color);
+      const list = Array.isArray(spec.residue) ? spec.residue : [spec.residue];
+      for (const res of list) {
+        if (res.at) this.later(res.at, PEND_DECAL, x, z, s).residue = res;
+        else this.armDecal(res.layer, x, z, s * res.size, res.life, res.alpha, res.color);
+      }
     }
     if (spec.shake) {
-      this.ctx.bus.emit('camera:shake', { intensity: spec.shake[0], duration: spec.shake[1] });
+      if (Array.isArray(spec.shake) && typeof spec.shake[0] === 'number') {
+        const [intensity, duration] = spec.shake as [number, number];
+        this.ctx.bus.emit('camera:shake', { intensity, duration });
+      } else {
+        for (const sh of spec.shake as ShakeSpec[]) {
+          if (sh.at) {
+            const p = this.later(sh.at, PEND_SHAKE, x, z, s);
+            p.shakeIntensity = sh.intensity;
+            p.shakeDuration = sh.duration;
+          } else {
+            this.ctx.bus.emit('camera:shake', {
+              intensity: sh.intensity,
+              duration: sh.duration,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Books one layer for `wait` seconds from now.
+   *
+   * Recycles the entry nearest to firing when the pool is full rather than
+   * dropping the newest: a booked layer that never arrives leaves an effect with
+   * a wind-up and no payoff, which reads far worse than a missing residue.
+   */
+  private later(wait: number, kind: number, x: number, z: number, scale: number): Pending {
+    let slot: Pending | null = null;
+    for (let k = 0; k < PENDING_MAX; k++) {
+      const p = this.pending[(this.pendingCursor + k) % PENDING_MAX]!;
+      if (!p.active) {
+        this.pendingCursor = (this.pendingCursor + k + 1) % PENDING_MAX;
+        slot = p;
+        break;
+      }
+    }
+    if (!slot) {
+      slot = this.pending[this.pendingCursor]!;
+      this.pendingCursor = (this.pendingCursor + 1) % PENDING_MAX;
+    }
+    slot.active = true;
+    slot.wait = wait;
+    slot.kind = kind;
+    slot.shape = null;
+    slot.burst = null;
+    slot.residue = null;
+    slot.shakeIntensity = 0;
+    slot.shakeDuration = 0;
+    slot.x = x;
+    slot.z = z;
+    slot.scale = scale;
+    return slot;
+  }
+
+  private stepPending(dt: number): void {
+    for (const p of this.pending) {
+      if (!p.active) continue;
+      p.wait -= dt;
+      if (p.wait > 0) continue;
+      p.active = false;
+      switch (p.kind) {
+        case PEND_SHAPE:
+          this.armShape(p.shape!, p.x, p.z, p.scale);
+          break;
+        case PEND_BURST:
+          this.particles.burst(
+            p.burst!,
+            p.x,
+            this.terrain.heightAt(p.x, p.z),
+            p.z,
+            p.scale,
+            visualRng.next() * Math.PI * 2,
+          );
+          break;
+        case PEND_DECAL: {
+          const res = p.residue!;
+          this.armDecal(res.layer, p.x, p.z, p.scale * res.size, res.life, res.alpha, res.color);
+          break;
+        }
+        default:
+          this.ctx.bus.emit('camera:shake', {
+            intensity: p.shakeIntensity,
+            duration: p.shakeDuration,
+          });
+          break;
+      }
     }
   }
 
@@ -640,6 +826,12 @@ export class VfxModule implements GameModule {
 
     if (this.demo) this.runDemo(dt);
 
+    // Booked layers first, so anything that comes due this frame is drawn on it
+    // rather than one frame late — at a 0.1 s wind-up, one frame is a sixth of
+    // the anticipation.
+    if (playback.fastForward) this.clearPending();
+    else this.stepPending(dt);
+
     this.shots.update(dt);
     this.beams.update(dt, this.particles);
     this.stepGround(dt);
@@ -778,6 +970,16 @@ export class VfxModule implements GameModule {
         p2,
         fx.layer,
       );
+    }
+  }
+
+  /** A replay jumps minutes in a moment; every booked beat would land at once. */
+  private clearPending(): void {
+    for (const p of this.pending) {
+      p.active = false;
+      p.shape = null;
+      p.burst = null;
+      p.residue = null;
     }
   }
 

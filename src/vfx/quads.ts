@@ -252,6 +252,16 @@ interface Particle {
   b1: number;
   alpha: number;
   fadeIn: number;
+  /**
+   * Exponent on the fade-out. The default of 2 is a spark: hot, then gone.
+   *
+   * It is also why the first pass at every explosion in this game read as a
+   * twinkle. A squared fade puts a particle at 20% alpha by the time it is
+   * halfway through its life, so the debris, dust and smoke that are supposed to
+   * *stay* long enough to be read were all but invisible from the moment they
+   * left the flash. Matter fades linearly or slower; only light fades like light.
+   */
+  decay: number;
   rot: number;
   spin: number;
   layer: number;
@@ -284,6 +294,7 @@ function blankParticle(): Particle {
     b1: 1,
     alpha: 1,
     fadeIn: 0.1,
+    decay: 2,
     rot: 0,
     spin: 0,
     layer: 0,
@@ -324,8 +335,30 @@ export interface BurstSpec {
   stretch?: number;
   fadeIn?: number;
   alpha?: number;
+  /**
+   * Fade-out exponent. 2 (the default) is light dying; 1 is matter drifting and
+   * 0.6 is residue that hangs. Anything meant to be *read* rather than glimpsed
+   * needs to come down off 2.
+   */
+  decay?: number;
   /** 0 = spread over the full circle, 1 = tight cone along the facing. */
   focus?: number;
+  /**
+   * Seconds to wait before this burst fires, counted from the moment the effect
+   * was played. This is the whole anticipation mechanism: one effect can now be
+   * a wind-up, a beat and a residue instead of everything arriving at once.
+   * Read by `index.ts`, which owns the schedule; `burst()` never sees it.
+   */
+  at?: number;
+  /**
+   * Flies *inward* instead of outward: particles spawn on the ring and are given
+   * exactly the speed that lands them at the centre as they die.
+   *
+   * A gather is the cheapest anticipation there is, and it is the one thing a
+   * purely outward particle system cannot express. Implies no drag — drag would
+   * strand the gather short of the point it is supposed to converge on.
+   */
+  converge?: boolean;
 }
 
 const linearCache = new Map<number, [number, number, number]>();
@@ -425,16 +458,28 @@ export class ParticleSystem {
       p.z = z + ca * r;
       p.y = groundY + (spec.y ?? 0) + rng.next() * (spec.yJitter ?? 0);
 
-      const sp = spec.speed ? rng.range(spec.speed[0], spec.speed[1]) : 0;
+      // Lifetime first: a converging particle's speed is solved from it.
+      p.maxLife = rng.range(spec.life[0], spec.life[1]);
+      p.life = p.maxLife;
+
       const sw = spec.swirl ? rng.range(spec.swirl[0], spec.swirl[1]) : 0;
-      p.vx = sa * sp + ca * sw;
-      p.vz = ca * sp - sa * sw;
+      if (spec.converge) {
+        // Land on the centre as the particle expires. The swirl is deliberately
+        // still allowed: a gather that spirals in reads as something being
+        // *drawn* rather than as something falling toward a point.
+        const closing = r / Math.max(0.05, p.maxLife);
+        p.vx = -sa * closing + ca * sw;
+        p.vz = -ca * closing - sa * sw;
+        p.drag = 0;
+      } else {
+        const sp = spec.speed ? rng.range(spec.speed[0], spec.speed[1]) : 0;
+        p.vx = sa * sp + ca * sw;
+        p.vz = ca * sp - sa * sw;
+        p.drag = spec.drag ?? 0;
+      }
       p.vy = spec.rise ? rng.range(spec.rise[0], spec.rise[1]) : 0;
 
       p.gravity = spec.gravity ?? 0;
-      p.drag = spec.drag ?? 0;
-      p.maxLife = rng.range(spec.life[0], spec.life[1]);
-      p.life = p.maxLife;
       p.size0 = rng.range(spec.size[0], spec.size[1]);
       p.size1 = p.size0 * (spec.sizeEnd ?? 1);
       p.r0 = c0[0] * i0;
@@ -445,6 +490,7 @@ export class ParticleSystem {
       p.b1 = c1[2] * i1;
       p.alpha = spec.alpha ?? 1;
       p.fadeIn = spec.fadeIn ?? 0.12;
+      p.decay = spec.decay ?? 2;
       p.rot = rng.next() * Math.PI * 2;
       p.spin = spec.spin ? rng.range(spec.spin[0], spec.spin[1]) : 0;
       p.layer = spec.layer;
@@ -497,6 +543,7 @@ export class ParticleSystem {
     p.b1 = color[2] * intensityEnd;
     p.alpha = alpha;
     p.fadeIn = 0.08;
+    p.decay = 2;
     p.rot = visualRng.next() * Math.PI * 2;
     p.spin = 0;
     p.layer = layer;
@@ -538,7 +585,7 @@ export class ParticleSystem {
       const t = 1 - p.life / p.maxLife;
       const fade =
         t < p.fadeIn ? t / Math.max(1e-4, p.fadeIn) : 1 - (t - p.fadeIn) / Math.max(1e-4, 1 - p.fadeIn);
-      const a = p.alpha * fade * fade;
+      const a = p.alpha * (p.decay === 2 ? fade * fade : Math.pow(fade, p.decay));
       const size = p.size0 + (p.size1 - p.size0) * t;
       const r = p.r0 + (p.r1 - p.r0) * t;
       const g = p.g0 + (p.g1 - p.g0) * t;
