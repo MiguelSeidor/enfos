@@ -16,6 +16,7 @@ licencia, el asset no entra.
 | `shop-sabotage.glb` | landmark: tienda T2 | Ídem | Proyecto | Propia | 2026-08-13 | n/a |
 | `portal.glb` | landmark: portales de aparición (4 instancias) | Imagen generada con Nano Banana Pro a partir de un prompt propio (ver `docs/ASSET_PROMPT.md`), convertida a 3D con **TRELLIS.2** (Microsoft, MIT) en Hugging Face Spaces | Proyecto | Propia — obra derivada de un prompt nuestro, sin material de terceros. TRELLIS es MIT y no reclama derechos sobre la salida | 2026-08-16 | https://huggingface.co/spaces/microsoft/TRELLIS.2 |
 | `fountain.glb` | landmark: Fuente | Imagen generada con Nano Banana Pro a partir de un prompt propio (ver `docs/ASSET_PROMPT.md`), convertida a 3D con **TRELLIS.2** (Microsoft, MIT) en Hugging Face Spaces | Proyecto | Propia — obra derivada de un prompt nuestro, sin material de terceros. TRELLIS es MIT y no reclama derechos sobre la salida | 2026-08-15 | https://huggingface.co/spaces/microsoft/TRELLIS.2 |
+| `hero-knight.glb` | hero.bulwark (candidato) | **KayKit Character Pack: Adventurers 1.0**, fichero `Characters/gltf/Knight.glb`, recortado a 7 clips con `tools/glb-keep-clips.mjs` | Kay Lousberg | **CC0 1.0 Universal** — uso personal, educativo y comercial; atribución no obligatoria (el autor la agradece) | 2026-09-29 | https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0 |
 
 **Nota sobre `bulwark.glb`**: 96.650 triángulos, sin esqueleto ni animaciones.
 Está en el manifiesto para validar el camino de carga, no porque un héroe
@@ -43,7 +44,8 @@ importamos.
 
 | Fuente | Licencia habitual | Atribución | Notas |
 | --- | --- | --- | --- |
-| **Quaternius** | CC0 | No requerida | Personajes low-poly estilizados, encajan con la cámara cenital |
+| **KayKit** (Kay Lousberg) | CC0 1.0 | No requerida, agradecida | Personajes riggeados y animados en glTF, un solo atlas de gradiente por personaje. Los paquetes gratuitos son Adventurers y Skeletons; los de pago traen además fuentes `.blend`. Verificar la licencia de cada paquete al descargar |
+| **Quaternius** | CC0 o **QAL** según el paquete | No requerida | Personajes low-poly estilizados, encajan con la cámara cenital. **Ojo**: algunos paquetes recientes ya no son CC0 sino licencia propia QAL. Comprobar uno por uno |
 | **Kenney** | CC0 | No requerida | Props y kits modulares |
 | **Poly Pizza** | CC0 / CC-BY | Según asset | Verificar una por una |
 | **Sketchfab** | Variable | Según asset | **Comprobar siempre**: mucho contenido es «personal use only» |
