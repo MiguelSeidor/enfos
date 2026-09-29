@@ -103,6 +103,21 @@ export class CreepBatch {
 
     // Materials must be cloned: the library caches and shares them with terrain
     // and props, and the VAT patch must not leak onto anything else.
+    //
+    // Known and deliberate: the clone does NOT carry the library's close-range
+    // detail injection, so creeps render without it while heroes built from the
+    // same materials get it. `onBeforeCompile` is a prototype no-op that
+    // `art/shading.ts` overwrites per instance, and `Material.copy` does not
+    // carry instance-assigned methods, so it is lost here and nothing errors.
+    //
+    // Restoring it was tried on 2026-09-29 and reverted. It composes correctly
+    // (detail takes `project_vertex` and the fragment stage, VAT takes
+    // `begin_vertex`; chaining compiles and both sets of uniforms arrive), but
+    // the detail layer brightens albedo around a 0.42 reference that assumed
+    // the old dark unit maps. Against the near-neutral mid-value maps the unit
+    // recipes use now, it washes every creep out to pale grey. Anyone retrying
+    // this needs to retune the detail albedo strength for units in the same
+    // pass, and to check it against a creep pack rather than a single figure.
     this.materials = sourceMaterials.map((m) => {
       const clone = m.clone();
       this.patch(clone);

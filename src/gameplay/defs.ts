@@ -106,7 +106,7 @@ export interface EnemyDef {
 export const ENEMIES: Record<string, EnemyDef> = {
   cleaver: {
     characterId: 'creep.cleaver',
-    name: 'Segador',
+    name: 'Orco carnicero',
     behavior: 'marcher',
     stats: stats({ maxHealth: 190, attackDamage: 16, attackSpeed: 0.85, moveSpeed: 5.6, armor: 4 }),
     bounty: { gold: 12, xp: 14 },
@@ -115,7 +115,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   },
   duskrunner: {
     characterId: 'creep.duskrunner',
-    name: 'Corredor del ocaso',
+    name: 'Huargo',
     behavior: 'hunter',
     stats: stats({
       maxHealth: 120,
@@ -131,7 +131,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   },
   spinebolt: {
     characterId: 'creep.spinebolt',
-    name: 'Saeta espinal',
+    name: 'Goblin ballestero',
     behavior: 'skirmisher',
     stats: stats({
       maxHealth: 105,
@@ -147,7 +147,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   },
   hexwright: {
     characterId: 'creep.hexwright',
-    name: 'Tejehechizos',
+    name: 'Hechicero',
     behavior: 'skirmisher',
     stats: stats({
       maxHealth: 135,
@@ -164,7 +164,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   },
   bastion: {
     characterId: 'creep.bastion',
-    name: 'Bastión de hueso',
+    name: 'Ogro',
     behavior: 'siege',
     stats: stats({
       maxHealth: 620,
@@ -334,7 +334,7 @@ export interface BossDef extends EnemyDef {
 export const BOSSES: Record<string, BossDef> = {
   marrowTitan: {
     characterId: 'boss.marrowTitan',
-    name: 'Titán de médula',
+    name: 'Dragón',
     behavior: 'siege',
     stats: stats({
       maxHealth: 5200,
