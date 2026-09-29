@@ -539,6 +539,76 @@ export function plate(opts: {
   });
 }
 
+/**
+ * Membrane wing. Authored in plan view — +X across the span, +Z forward along
+ * the chord — because at play zoom a wing is read from above: what identifies it
+ * is the span and the scalloped trailing edge, not the aerofoil profile.
+ *
+ * The finger struts are not separate parts. They are ridges in the thickness
+ * function at the same span positions the scallops peak between, which is what
+ * keeps a 4 m wing at a few hundred vertices instead of a few thousand.
+ */
+export function wing(opts: {
+  span: number;
+  /** Chord (leading edge → trailing edge) at the root and at the tip. */
+  rootChord: number;
+  tipChord: number;
+  /** How far back the leading edge rakes across the span. */
+  sweep: number;
+  /** Finger count; also the number of scallops in the trailing edge. */
+  fingers?: number;
+  /** Depth of each scallop, as a fraction of the chord. */
+  scallop?: number;
+  /** Tip drop, so the wing is a curved sheet instead of a plank. */
+  droop?: number;
+  /** Upward bow across the chord. */
+  camber?: number;
+  thickness?: number;
+  /** Height of the finger ridges over the membrane. */
+  strut?: number;
+  /** How far the membrane sags between the fingers. */
+  sag?: number;
+}): THREE.BufferGeometry {
+  const fingers = opts.fingers ?? 4;
+  const scallop = opts.scallop ?? 0.3;
+  const droop = opts.droop ?? 0.2;
+  const camber = opts.camber ?? 0.1;
+  const base = opts.thickness ?? 0.012;
+  const strut = opts.strut ?? 0.04;
+  const sag = opts.sag ?? 0.09;
+  const chordAt = (v: number): number => opts.rootChord + (opts.tipChord - opts.rootChord) * v;
+  // Zero at each finger line, one midway between: the scallop is the gap.
+  const gap = (v: number): number => 0.5 - 0.5 * Math.cos(fingers * TAU * v);
+  return shell({
+    nu: 6,
+    nv: 7 * fingers,
+    surface: (u, v, out) => {
+      const chord = chordAt(v) * (1 - scallop * gap(v));
+      const lead = opts.rootChord * 0.42 - opts.sweep * Math.pow(v, 1.25);
+      out.set(
+        opts.span * v,
+        // Camber across the chord, droop along the span, and a sag between the
+        // fingers: the membrane is pulled tight at the struts and hangs
+        // between them, which is the difference between a wing and a board.
+        -droop * v * v +
+          camber * Math.sin(Math.PI * u) * (1 - v * 0.6) -
+          sag * gap(v) * Math.sin(Math.PI * Math.min(1, u * 1.15)),
+        lead - u * chord,
+      );
+    },
+    thickness: (u, v) => {
+      const ridge = Math.pow(Math.max(0, Math.cos(fingers * TAU * v)), 5);
+      // Thin where the light has to pass through it, proud along the fingers.
+      return (
+        base * (0.22 + 0.78 * Math.pow(1 - u, 1.6)) * (1 - 0.5 * v) +
+        strut * ridge * (1 - 0.25 * u) * (1 - 0.45 * v)
+      );
+    },
+    uvScale: 2.2,
+    smoothAngle: 34,
+  });
+}
+
 /** Lathe profile helper: takes [radius, height] pairs and revolves them. */
 export function lathe(points: [number, number][], segments = 14): THREE.BufferGeometry {
   const pts = points.map(([r, y]) => new THREE.Vector2(Math.max(r, 1e-4), y));

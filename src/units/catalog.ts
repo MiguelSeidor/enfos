@@ -1,22 +1,35 @@
 /**
  * Character catalog. Owner: CHARACTERS agent.
  *
- * Eight original archetypes: two contrasting heroes, the five enemy roles the
- * GDD §13 bestiary requires, and one boss. Every mass here exists to serve the
- * outline — the review bar is "identifiable from silhouette alone", so each
- * recipe commits to one dominant shape and refuses to share it:
+ * Four heroes, the five enemy roles the GDD §13 bestiary requires, and one
+ * boss. Every mass here exists to serve the outline, because the real viewing
+ * condition is 41.5 screen pixels per world metre: a 1.9 m creature is 79 px
+ * tall, in motion, in a crowd. At that size identity lives in the SILHOUETTE
+ * and in gross proportion. Surface detail does not survive the trip.
  *
- *   bulwark    wide trapezoid, slab shield left, hammer right
- *   oracle     tall cone, fan collar, big ring on a staff
- *   cleaver    lopsided box, one huge right pauldron, low cleaver
- *   spinebolt  narrow vertical + horizontal bow + fan of back spines
- *   duskrunner low horizontal arrow, digitigrade, long tail
- *   bastion    squat dome, no neck, ground-dragging fists
- *   hexwright  floating spike cluster, nothing touching the ground
- *   titan      asymmetric giant, one fused maul arm, horn crown
+ * The enemies are cast as familiar fantasy creatures rather than abstract
+ * archetypes, because a shared cultural shape is the only thing that reads in
+ * one glance: an orc is tusks and a hunch, a dragon is a wing span. An abstract
+ * name produces an abstract shape and a new player learns nothing from it.
  *
- * Nothing here is derived from any existing game's art: shapes are generated
- * from parameters and the names, proportions and kit are original.
+ *   bulwark    hero   wide trapezoid, slab shield left, hammer right
+ *   oracle     hero   tall cone, fan collar, big ring on a staff
+ *   talon      hero   narrow vertical, hood, tall recurve bow
+ *   vesper     hero   robe bell, halo over the head, swinging lantern
+ *   cleaver    orc    hunched back, tusks breaking the head outline, cleaver
+ *   spinebolt  goblin small, ears wider than the shoulders, crossbow
+ *   duskrunner wolf   QUADRUPED — the only body longer than it is tall
+ *   bastion    ogre   gut wider than the shoulders, tiny head, club diagonal
+ *   hexwright  mage   brimmed pointed hat, floor-length robe, tall staff
+ *   titan      dragon WINGED FLYER — 4 m span, off the ground, long tail
+ *
+ * The roster deliberately spans six body plans (hunched brute, small biped,
+ * quadruped, mass biped, robed biped, flyer) rather than six dressings of one
+ * biped, since at 79 px skeleton layout is the only variation that survives.
+ *
+ * Nothing here is derived from any existing game's art: creature types like
+ * "orc" or "dragon" are generic, and every shape is generated from parameters
+ * authored in this file.
  */
 
 import * as THREE from 'three';
@@ -24,7 +37,21 @@ import type { VisualDescriptor } from '@/core/contracts';
 import type { MaterialId } from '@/art/materials';
 import { CharacterBuilder, type Palette, type SlotConfig, type SlotName } from './build/character';
 import { addBody, boneDistance, limbGeo, rw } from './build/body';
-import { blade, gem, lathe, loft, plate, prism, roughen, shell, spike, sphereish, torus } from './build/shapes';
+import {
+  blade,
+  gem,
+  lathe,
+  loft,
+  plate,
+  prism,
+  roughen,
+  shell,
+  spike,
+  sphereish,
+  torus,
+  wing,
+  type Ring,
+} from './build/shapes';
 import { B, buildRig, DEFAULT_PROPORTIONS, type Proportions, type Rig } from './rig/rig';
 import { DEFAULT_PROFILE, type AnimProfile } from './anim/clips';
 
@@ -607,6 +634,9 @@ const oracle: CharacterDef = {
       handScale: 1.0,
       depthRatio: 0.82,
       robe: { slot: 'cloth', flare: 0.46 },
+      // Robe-violet hair and eye band against skin: the head carries two
+      // values of its own instead of relying on the crown alone.
+      face: { eyeSlot: 'cloth', hairSlot: 'cloth', hair: 0.34 },
     });
 
     const chest = rw(rig, B.chest);
@@ -858,6 +888,9 @@ const talon: CharacterDef = {
       bootScale: 1.1,
       depthRatio: 0.62,
       head: true,
+      // No hair: the hood owns the back of the skull. The band under the brow
+      // is what stops the face reading as a blank oval inside it.
+      face: { eyeSlot: 'cloth' },
     });
 
     const chest = rw(rig, B.chest);
@@ -1111,6 +1144,9 @@ const vesper: CharacterDef = {
       depthRatio: 0.7,
       robe: { slot: 'cloth', flare: 0.62, hemNoise: 5 },
       head: true,
+      // Brown hair against a cream robe and pale skin: the only dark shape
+      // above her shoulders apart from the eye band.
+      face: { eyeSlot: 'leather', hairSlot: 'leather', hair: 0.44 },
     });
 
     const chest = rw(rig, B.chest);
@@ -1244,32 +1280,41 @@ const vesper: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. Ruin Cleaver — melee creep
+// 5. Orco carnicero — melee creep
+//
+// SILHOUETTE HOOK: a pair of tusks that break the head outline sideways, on a
+// back hunched far enough that the skull hangs in FRONT of the shoulder line,
+// and a cleaver as wide as his own chest.
+//
+// At 79 px the head is about 9 px tall, so the tusks are authored at a third of
+// the skull's height each — absurd on a model sheet, legible in a crowd. The
+// hunch does the rest of the work: he is the only figure whose head is not the
+// highest point of his own outline.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CLEAVER_PALETTE: Palette = {
-  primary: 0x5b6b4e,
-  secondary: 0x5c3a24,
+const ORC_PALETTE: Palette = {
+  primary: 0x53703c,
+  secondary: 0x59371f,
   accent: 0x9a8f74,
   emissive: 0x9fe86a,
 };
 
 const cleaver: CharacterDef = {
   id: 'creep.cleaver',
-  name: 'Ruin Cleaver',
+  name: 'Orco carnicero',
   kind: 'creep',
   archetype: 'melee',
   proportions: prop({
-    height: 1.98,
-    legFraction: 0.42,
-    hipHalfWidth: 0.17,
-    shoulderHalfWidth: 0.35,
-    torsoFraction: 0.29,
-    neckLength: 0.03,
-    headSize: 0.19,
-    armFraction: 0.5,
-    stoop: 0.4,
-    footLength: 0.26,
+    height: 2.05,
+    legFraction: 0.4,
+    hipHalfWidth: 0.19,
+    shoulderHalfWidth: 0.4,
+    torsoFraction: 0.3,
+    neckLength: 0.02,
+    headSize: 0.24,
+    armFraction: 0.56,
+    stoop: 0.95,
+    footLength: 0.3,
   }),
   profile: profile({
     idlePeriod: 3.0,
@@ -1290,51 +1335,161 @@ const cleaver: CharacterDef = {
     weight: 0.68,
   }),
   slots: {
-    armor: slot('unit.chitin', { tint: 'primary', roughness: 0.55, metalness: 0.2 }),
+    armor: slot('unit.steel', { tint: 'accent', roughness: 0.6, metalness: 0.9 }),
     cloth: slot('unit.cloth', { tint: 'secondary', metalness: 0 }),
     leather: slot('unit.leather', { tint: 'none', metalness: 0 }),
     metal: slot('unit.steel', { tint: 'none', roughness: 0.5, metalness: 1 }),
-    flesh: slot('unit.skin', { tint: 'primary', shade: 0.85, metalness: 0 }),
+    flesh: slot('unit.skin', { tint: 'primary', shade: 0.95, metalness: 0 }),
     glow: slot('unit.bone', { tint: 'none', metalness: 0, emissiveIntensity: 3.5 }),
   },
-  palette: CLEAVER_PALETTE,
-  visual: visual('creep.cleaver', 'lopsided-hunched-box', CLEAVER_PALETTE, 1, ['chitin', 'leather']),
+  palette: ORC_PALETTE,
+  visual: visual('creep.cleaver', 'hunched-orc-tusks-cleaver', ORC_PALETTE, 1, ['skin', 'leather']),
   build(b, rig) {
     const p = rig.proportions;
+    const hs = p.headSize;
     addBody(b, rig, {
       torsoSlot: 'flesh',
       limbSlot: 'flesh',
       handSlot: 'flesh',
-      headSlot: 'flesh',
       bootSlot: 'leather',
       round: 3.6,
-      chestScale: 1.1,
-      waistScale: 0.86,
-      armScale: 1.12,
-      legScale: 1.05,
-      handScale: 1.45,
-      bootScale: 1.15,
-      depthRatio: 0.76,
+      chestScale: 1.2,
+      waistScale: 0.84,
+      armScale: 1.3,
+      legScale: 1.2,
+      handScale: 1.7,
+      bootScale: 1.3,
+      depthRatio: 0.82,
       neck: false,
+      head: false,
     });
 
     const chest = rw(rig, B.chest);
     const pelvis = rw(rig, B.pelvis);
 
-    // Asymmetry is the whole read: one huge right shoulder, one bare left arm.
-    pauldron(b, rig, 'R', { size: 0.31, slot: 'armor', lames: 2, tiltOut: 0.5, spike: 1.8, spikeSlot: 'metal' });
-    b.add(prism({ h: 0.17, w0: 0.09, d0: 0.1, w1: 0.075, d1: 0.085, round: 5, segments: 8 }), {
+    // ── The hunch, as mass rather than as a lean: a slab of shoulder piled
+    // behind the neck. It is what pushes the skull out in front of the chest.
+    b.add(
+      roughen(
+        loft(
+          [
+            { y: -0.22, w: p.shoulderHalfWidth * 0.8, d: 0.17, round: 4 },
+            { y: 0.0, w: p.shoulderHalfWidth * 1.0, d: 0.24, round: 4.6 },
+            { y: 0.18, w: p.shoulderHalfWidth * 0.62, d: 0.17, round: 4 },
+          ],
+          { segments: 12, smoothAngle: 46 },
+        ),
+        0.016,
+        7,
+        2,
+      ),
+      {
+        slot: 'flesh',
+        at: [0, chest[1] + 0.06, chest[2] - p.shoulderHalfWidth * 0.42],
+        bind: { bones: [B.chest], rigid: true },
+        uvScale: 1.6,
+      },
+    );
+
+    // ── Skull: low forehead, no neck, jaw pushed forward under a heavy brow.
+    // Every feature below is placed relative to the skull's own offset, not to
+    // the head bone: the skull sits well forward of the bone, so anything
+    // placed at the bone's origin would be buried inside it.
+    const skullY = hs * 0.16;
+    const skullZ = hs * 0.3;
+    b.add(
+      loft(
+        [
+          { y: -hs * 0.55, w: hs * 0.66, d: hs * 0.78, z: hs * 0.24, round: 3 },
+          { y: -hs * 0.18, w: hs * 0.96, d: hs * 1.0, z: hs * 0.12, round: 3.2 },
+          { y: hs * 0.26, w: hs * 1.0, d: hs * 0.94, z: 0, round: 3.4 },
+          { y: hs * 0.58, w: hs * 0.6, d: hs * 0.58, z: -hs * 0.12, round: 3 },
+        ],
+        { segments: 10, smoothAngle: 52 },
+      ),
+      {
+        slot: 'flesh',
+        bone: B.head,
+        at: [0, skullY, skullZ],
+        bind: { bones: [B.head], rigid: true },
+        uvScale: 1,
+      },
+    );
+    // Brow, proud of the face, and a band under it held back in its shadow and
+    // cut from a darker material. That step is the whole face at 15 px.
+    b.add(plate({ width: hs * 1.14, height: hs * 0.26, thickness: hs * 0.1, bow: 0.3, droop: 0.1, bottomScale: 0.88 }), {
+      slot: 'flesh',
+      bone: B.head,
+      at: [0, skullY + hs * 0.28, skullZ + hs * 0.62],
+      rot: [0.42, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1.1,
+    });
+    b.add(plate({ width: hs * 1.04, height: hs * 0.32, thickness: hs * 0.05, bow: 0.26, bottomScale: 0.8 }), {
+      slot: 'leather',
+      bone: B.head,
+      at: [0, skullY - hs * 0.04, skullZ + hs * 0.62],
+      rot: [0.1, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1.2,
+    });
+
+    // ── TUSKS. Up and out of the lower jaw, past the cheekbone, so the head
+    // outline is notched on both sides. Nothing else in the cast is notched.
+    b.add(spike({ length: hs * 2.3, baseW: hs * 0.26, curve: 0.4, taper: 1.7, segments: 6 }), {
+      slot: 'armor',
+      bone: B.head,
+      at: [hs * 0.46, skullY - hs * 0.4, skullZ + hs * 0.56],
+      // Tipped forward as well as out: a tusk that only goes up is hidden by
+      // the brow from a camera that is already looking down on it. The Warden's
+      // helm horns are the proof that this angle is what reads at play zoom.
+      rot: [0.5, 0, -0.95],
+      mirror: true,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 0.7,
+    });
+    // Two smaller lower fangs, to thicken the jaw line between the tusks.
+    b.add(spike({ length: hs * 0.55, baseW: hs * 0.13, curve: 0.2, taper: 1.8, segments: 5 }), {
+      slot: 'armor',
+      bone: B.head,
+      at: [hs * 0.2, skullY - hs * 0.42, skullZ + hs * 0.72],
+      rot: [0.1, 0, -0.2],
+      mirror: true,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 0.6,
+    });
+    b.add(gem(0.024, 0), {
+      slot: 'glow',
+      bone: B.head,
+      at: [hs * 0.32, skullY + hs * 0.04, skullZ + hs * 0.96],
+      mirror: true,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1,
+    });
+    // Braided top-knot: a second vertical accent on an otherwise round skull.
+    b.add(spike({ length: hs * 1.2, baseW: hs * 0.17, curve: -0.6, taper: 1.4, segments: 6 }), {
+      slot: 'leather',
+      bone: B.head,
+      at: [0, skullY + hs * 0.6, skullZ - hs * 0.1],
+      rot: [-0.35, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 0.7,
+    });
+
+    // Asymmetry is the second read: one plated shoulder, one bare arm.
+    pauldron(b, rig, 'R', { size: 0.33, slot: 'armor', lames: 2, tiltOut: 0.55, spike: 1.9, spikeSlot: 'metal' });
+    b.add(prism({ h: 0.19, w0: 0.1, d0: 0.11, w1: 0.082, d1: 0.092, round: 5, segments: 8 }), {
       slot: 'leather',
       bone: 'elbow.L',
-      at: [0, -0.16, 0],
+      at: [0, -0.18, 0],
       bind: { bones: ['elbow.L', 'wrist.L'], rigid: true },
       uvScale: 1.2,
     });
 
     // Chest strapping and a hanging loincloth.
-    b.add(plate({ width: 0.36, height: 0.1, thickness: 0.02, bow: 0.3, topScale: 0.9, bottomScale: 0.9 }), {
+    b.add(plate({ width: 0.42, height: 0.12, thickness: 0.022, bow: 0.3, topScale: 0.9, bottomScale: 0.9 }), {
       slot: 'leather',
-      at: [0.02, chest[1] - 0.24, chest[2] + 0.02],
+      at: [0.02, chest[1] - 0.26, chest[2] + 0.04],
       rot: [0, 0, 0.42],
       bind: { bones: [B.chest, B.spine], falloff: 0.2, bias: 1.4 },
       uvScale: 1.2,
@@ -1343,110 +1498,95 @@ const cleaver: CharacterDef = {
       slot: 'cloth',
       bones: [B.pelvis],
       topY: pelvis[1] + 0.04,
-      bottomY: pelvis[1] - 0.42,
-      topW: 0.3,
-      bottomW: 0.24,
-      z: p.hipHalfWidth * 1.0,
+      bottomY: pelvis[1] - 0.46,
+      topW: 0.34,
+      bottomW: 0.28,
+      z: p.hipHalfWidth * 1.05,
       hemPoint: 0.35,
     });
 
-    // Head: heavy jaw, two short forward horns, single glowing eye slit.
-    b.add(
-      loft(
-        [
-          { y: -0.06, w: p.headSize * 0.72, d: p.headSize * 0.94, z: p.headSize * 0.3, round: 3 },
-          { y: 0.05, w: p.headSize * 0.92, d: p.headSize * 1.0, z: p.headSize * 0.12, round: 3.2 },
-          { y: 0.17, w: p.headSize * 0.8, d: p.headSize * 0.84, z: -p.headSize * 0.06, round: 3.2 },
-        ],
-        { segments: 10, smoothAngle: 52 },
-      ),
-      {
-        slot: 'flesh',
-        bone: B.head,
-        at: [0, p.headSize * 0.3, 0],
-        bind: { bones: [B.head], rigid: true },
-        uvScale: 1,
-      },
-    );
-    b.add(spike({ length: p.headSize * 1.35, baseW: p.headSize * 0.2, curve: 0.5, taper: 1.9, segments: 6 }), {
-      slot: 'metal',
-      bone: B.head,
-      at: [p.headSize * 0.5, p.headSize * 0.55, p.headSize * 0.1],
-      rot: [0.3, 0, -0.5],
-      mirror: true,
-      bind: { bones: [B.head], rigid: true },
-      uvScale: 0.7,
-    });
-    b.add(prism({ h: 0.03, w0: 0.02, d0: p.headSize * 0.34, w1: 0.014, d1: p.headSize * 0.3, round: 4, segments: 5 }), {
-      slot: 'glow',
-      bone: B.head,
-      at: [0, p.headSize * 0.42, p.headSize * 0.78],
-      rot: [Math.PI / 2, 0, 0],
-      bind: { bones: [B.head], rigid: true },
-      uvScale: 0.5,
-    });
-
-    // ── Cleaver: broad, curved, held low in the right hand.
-    b.add(prism({ h: 0.34, w0: 0.034, d0: 0.034, w1: 0.03, d1: 0.03, round: 6, segments: 6 }), {
+    // ── Cleaver: a slab as wide as his chest, held low in the right hand.
+    b.add(prism({ h: 0.4, w0: 0.042, d0: 0.042, w1: 0.036, d1: 0.036, round: 6, segments: 6 }), {
       slot: 'leather',
       bone: 'hand.R',
-      at: [0, -0.14, 0.02],
+      at: [0, -0.16, 0.02],
       rot: [0.3, 0, 0.12],
       bind: { bones: ['hand.R'], rigid: true },
       uvScale: 1.2,
     });
-    b.add(blade({ length: 0.78, width: 0.4, thickness: 0.05, curve: 0.42, belly: 0.62, tip: 0.42, heel: 0.72 }), {
+    b.add(blade({ length: 0.98, width: 0.56, thickness: 0.06, curve: 0.4, belly: 0.66, tip: 0.46, heel: 0.78 }), {
       slot: 'metal',
       bone: 'hand.R',
-      at: [0.02, 0.14, 0.06],
+      at: [0.02, 0.16, 0.06],
       rot: [0.3, 0, 0.12],
       bind: { bones: ['hand.R'], rigid: true },
       uvScale: 1.4,
+    });
+    // Spine of the cleaver, so the slab keeps an edge-lit line when it swings.
+    b.add(prism({ h: 0.86, w0: 0.03, d0: 0.05, w1: 0.02, d1: 0.035, round: 4, segments: 5 }), {
+      slot: 'armor',
+      bone: 'hand.R',
+      at: [0.28, 0.2, 0.06],
+      rot: [0.3, 0, 0.12],
+      bind: { bones: ['hand.R'], rigid: true },
+      uvScale: 0.8,
     });
   },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. Spinebolt Stalker — ranged creep
+// 6. Goblin ballestero — ranged creep
+//
+// SILHOUETTE HOOK: ears longer than its own head, held out sideways past the
+// shoulders, on a body two thirds the height of the orc's.
+//
+// The ear span is 1.15 m — about 48 px — on a figure only 62 px tall, so the
+// widest part of this creature is its head. That is the whole identification:
+// small, wide-headed and hunched reads as "goblin" before any detail resolves,
+// and the size difference alone separates it from the orc it fights beside.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SPINEBOLT_PALETTE: Palette = {
-  primary: 0x33404f,
+const GOBLIN_PALETTE: Palette = {
+  primary: 0x6d8438,
   secondary: 0x4a3524,
   accent: 0xb9ad90,
-  emissive: 0x66d8ff,
+  emissive: 0xffc24a,
 };
 
 const spinebolt: CharacterDef = {
   id: 'creep.spinebolt',
-  name: 'Spinebolt Stalker',
+  name: 'Goblin ballestero',
   kind: 'creep',
   archetype: 'ranged',
   proportions: prop({
-    height: 2.12,
-    legFraction: 0.54,
-    hipHalfWidth: 0.14,
-    shoulderHalfWidth: 0.23,
+    // Finished height lands near 1.55 m once the skull is on: two thirds of
+    // the orc it marches beside, which is half of how it is identified.
+    height: 1.45,
+    legFraction: 0.44,
+    hipHalfWidth: 0.12,
+    shoulderHalfWidth: 0.2,
     torsoFraction: 0.26,
-    neckLength: 0.07,
-    headSize: 0.155,
-    armFraction: 0.46,
-    stoop: 0.14,
-    footLength: 0.24,
+    neckLength: 0.02,
+    headSize: 0.235,
+    armFraction: 0.5,
+    stoop: 0.7,
+    footLength: 0.22,
   }),
   profile: profile({
-    idlePeriod: 2.8,
+    idlePeriod: 2.4,
     breath: 0.8,
-    stanceWidth: 1.1,
-    crouch: 0.28,
-    armSplay: 0.16,
+    stanceWidth: 1.15,
+    crouch: 0.45,
+    armSplay: 0.2,
     walkSpeed: 3.4,
     runSpeed: 6.0,
-    stride: 1.3,
-    bob: 0.04,
-    lean: 0.1,
+    // Short legs: a long stride here would visibly skate, since the foot
+    // cycle rate is derived from stride over ground speed.
+    stride: 0.82,
+    bob: 0.05,
+    lean: 0.12,
     armSwing: 0.4,
-    footLift: 0.19,
+    footLift: 0.14,
     attackDuration: 1.25,
     attackStyle: 'shoot',
     castDuration: 1.4,
@@ -1455,385 +1595,568 @@ const spinebolt: CharacterDef = {
     mainHand: 'R',
   }),
   slots: {
-    armor: slot('unit.chitin', { tint: 'primary', roughness: 0.45, metalness: 0.25 }),
+    armor: slot('unit.leather', { tint: 'secondary', roughness: 0.7, metalness: 0 }),
     cloth: slot('unit.cloth', { tint: 'secondary', metalness: 0 }),
     leather: slot('unit.leather', { tint: 'none', metalness: 0 }),
-    metal: slot('unit.bone', { tint: 'accent', roughness: 0.6, metalness: 0 }),
-    flesh: slot('unit.skin', { tint: 'primary', shade: 1.15, metalness: 0 }),
+    metal: slot('unit.steel', { tint: 'none', roughness: 0.5, metalness: 1 }),
+    flesh: slot('unit.skin', { tint: 'primary', shade: 1.1, metalness: 0 }),
     glow: slot('unit.bone', { tint: 'none', metalness: 0, emissiveIntensity: 3.8 }),
   },
-  palette: SPINEBOLT_PALETTE,
-  visual: visual('creep.spinebolt', 'narrow-vertical-crossed-bow', SPINEBOLT_PALETTE, 1, ['chitin', 'bone']),
+  palette: GOBLIN_PALETTE,
+  visual: visual('creep.spinebolt', 'small-wide-eared-goblin-crossbow', GOBLIN_PALETTE, 1, ['skin', 'leather']),
   build(b, rig) {
     const p = rig.proportions;
+    const hs = p.headSize;
     addBody(b, rig, {
-      torsoSlot: 'armor',
+      torsoSlot: 'flesh',
       limbSlot: 'flesh',
       handSlot: 'flesh',
-      headSlot: 'armor',
-      bootSlot: 'leather',
+      bootSlot: 'flesh',
       round: 3.2,
-      chestScale: 0.96,
-      waistScale: 0.82,
-      armScale: 0.72,
-      legScale: 0.82,
-      handScale: 1.05,
+      chestScale: 0.95,
+      waistScale: 0.78,
+      armScale: 0.85,
+      legScale: 0.85,
+      handScale: 1.35,
       bootScale: 1.05,
-      depthRatio: 0.66,
+      depthRatio: 0.6,
+      neck: false,
       head: false,
     });
 
     const chest = rw(rig, B.chest);
+    const pelvis = rw(rig, B.pelvis);
 
-    // Beaked mask instead of a face; the profile is the recognition cue.
+    // ── Skull: a cranium far too big for the body, a receding chin and a long
+    // hooked nose. Round on top, pointed at the front: a wedge seen from above.
     b.add(
       loft(
         [
-          { y: -p.headSize * 0.7, w: p.headSize * 0.5, d: p.headSize * 0.55, round: 3 },
-          { y: -p.headSize * 0.1, w: p.headSize * 0.92, d: p.headSize * 1.0, round: 3.2 },
-          { y: p.headSize * 0.45, w: p.headSize * 0.8, d: p.headSize * 0.88, z: -p.headSize * 0.08, round: 3.2 },
-          { y: p.headSize * 0.85, w: p.headSize * 0.4, d: p.headSize * 0.46, z: -p.headSize * 0.16, round: 3 },
+          { y: -hs * 0.52, w: hs * 0.46, d: hs * 0.6, z: hs * 0.26, round: 3 },
+          { y: -hs * 0.16, w: hs * 0.86, d: hs * 0.98, z: hs * 0.1, round: 3.2 },
+          { y: hs * 0.22, w: hs * 0.98, d: hs * 1.0, z: -hs * 0.04, round: 3.4 },
+          { y: hs * 0.56, w: hs * 0.54, d: hs * 0.58, z: -hs * 0.14, round: 3 },
         ],
         { segments: 10, smoothAngle: 52 },
       ),
       {
-        slot: 'armor',
+        slot: 'flesh',
         bone: B.head,
-        at: [0, p.headSize * 0.4, 0],
+        at: [0, hs * 0.12, hs * 0.12],
         bind: { bones: [B.head], rigid: true },
         uvScale: 1,
       },
     );
-    b.add(spike({ length: p.headSize * 1.5, baseW: p.headSize * 0.3, curve: 0, taper: 2.2, segments: 6 }), {
-      slot: 'metal',
+    // Hooked nose, the front point of the wedge.
+    b.add(spike({ length: hs * 1.15, baseW: hs * 0.26, curve: 0.55, taper: 1.5, segments: 6 }), {
+      slot: 'flesh',
       bone: B.head,
-      at: [0, p.headSize * 0.34, p.headSize * 0.5],
-      rot: [Math.PI / 2 + 0.25, 0, 0],
+      at: [0, hs * 0.1, hs * 0.55],
+      rot: [Math.PI / 2 - 0.25, 0, 0],
       bind: { bones: [B.head], rigid: true },
-      uvScale: 0.7,
+      uvScale: 0.8,
     });
-    b.add(gem(0.028, 0), {
+    // Heavy brow over a dark band: the same two-value face as the orc's, and
+    // the reason the eyes do not vanish under a wide skull at distance.
+    b.add(plate({ width: hs * 1.0, height: hs * 0.22, thickness: hs * 0.09, bow: 0.3, droop: 0.12, bottomScale: 0.9 }), {
+      slot: 'flesh',
+      bone: B.head,
+      at: [0, hs * 0.34, hs * 0.5],
+      rot: [0.45, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1.1,
+    });
+    b.add(plate({ width: hs * 0.92, height: hs * 0.26, thickness: hs * 0.05, bow: 0.26, bottomScale: 0.82 }), {
+      slot: 'armor',
+      bone: B.head,
+      at: [0, hs * 0.1, hs * 0.5],
+      rot: [0.12, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1.2,
+    });
+    b.add(gem(0.022, 0), {
       slot: 'glow',
       bone: B.head,
-      at: [p.headSize * 0.36, p.headSize * 0.56, p.headSize * 0.42],
+      at: [hs * 0.3, hs * 0.2, hs * 0.86],
       mirror: true,
       bind: { bones: [B.head], rigid: true },
       uvScale: 1,
     });
 
-    // ── Quiver of spines fanning up behind the shoulders.
-    spikeRow(b, rig, {
-      bone: B.chest,
-      count: 7,
-      from: [-0.22, chest[1] - 0.02, -0.14],
-      to: [0.22, chest[1] - 0.02, -0.14],
-      length: 0.78,
-      baseW: 0.032,
-      slot: 'metal',
-      curve: -0.34,
-      tilt: -0.42,
-      bind: [B.chest],
-    });
-    b.add(plate({ width: 0.26, height: 0.16, thickness: 0.022, bow: -0.24, topScale: 1.1, bottomScale: 0.7 }), {
+    // ── EARS. The hook: each one longer than the skull is tall, canted so it
+    // presents its full width to a camera looking down at 50 degrees.
+    const ear = hs * 1.95;
+    for (const sx of [-1, 1]) {
+      b.add(
+        shell({
+          nu: 4,
+          nv: 9,
+          surface: (u, v, out) => {
+            const w = hs * 0.95 * Math.sin(Math.PI * Math.min(1, 0.22 + v * 0.7)) * (1 - v * 0.5);
+            const k = u - 0.5;
+            out.set(
+              sx * (hs * 0.48 + v * ear * 0.92),
+              hs * 0.08 + v * ear * 0.34 + k * w * 0.78,
+              -v * ear * 0.4 + k * w * 0.6,
+            );
+          },
+          thickness: (_u, v) => 0.015 * (1 - v * 0.55) + 0.004,
+          uvScale: 1.6,
+          smoothAngle: 44,
+        }),
+        {
+          slot: 'flesh',
+          bone: B.head,
+          at: [0, hs * 0.12, 0],
+          bind: { bones: [B.head], rigid: true },
+          uvScale: 1,
+        },
+      );
+    }
+
+    // Scrap armour: one strap, one shoulder plate, nothing that widens him.
+    b.add(plate({ width: 0.24, height: 0.1, thickness: 0.018, bow: 0.28, topScale: 0.9, bottomScale: 0.9 }), {
       slot: 'leather',
-      at: [0, chest[1] - 0.14, -0.13],
-      rot: [0.3, 0, 0],
-      bind: { bones: [B.chest], rigid: true },
+      at: [0.01, chest[1] - 0.14, chest[2] + 0.04],
+      rot: [0, 0, -0.5],
+      bind: { bones: [B.chest, B.spine], falloff: 0.16, bias: 1.4 },
       uvScale: 1.2,
     });
+    pauldron(b, rig, 'L', { size: 0.1, slot: 'armor', lames: 1, tiltOut: 0.28 });
+    clothPanel(b, rig, {
+      slot: 'cloth',
+      bones: [B.pelvis],
+      topY: pelvis[1] + 0.03,
+      bottomY: pelvis[1] - 0.24,
+      topW: 0.22,
+      bottomW: 0.18,
+      z: p.hipHalfWidth * 1.05,
+      hemPoint: 0.45,
+      thickness: 0.009,
+    });
 
-    // Light shoulder caps only — the silhouette must stay narrow.
-    pauldron(b, rig, 'both', { size: 0.13, slot: 'armor', lames: 1, tiltOut: 0.3 });
+    // ── Bolt case on the hip: a short cylinder with three bolts fanning out.
+    b.add(prism({ h: 0.24, w0: 0.05, d0: 0.05, w1: 0.056, d1: 0.056, round: 7, segments: 7 }), {
+      slot: 'leather',
+      at: [-p.hipHalfWidth * 1.5, pelvis[1] - 0.02, -0.04],
+      rot: [-0.3, 0, -0.35],
+      bind: { bones: [B.pelvis], rigid: true },
+      uvScale: 1.2,
+    });
+    spikeRow(b, rig, {
+      bone: B.pelvis,
+      count: 3,
+      from: [-p.hipHalfWidth * 1.7, pelvis[1] + 0.12, -0.06],
+      to: [-p.hipHalfWidth * 1.3, pelvis[1] + 0.12, -0.02],
+      length: 0.22,
+      baseW: 0.016,
+      slot: 'metal',
+      curve: 0,
+      tilt: -0.35,
+      bind: [B.pelvis],
+    });
 
-    // ── Bow: held horizontally across the body. The crossbar of the "T".
-    const span = 1.5;
+    // ── Crossbow: a short bow across a heavy stock, carried level in both
+    // hands. Horizontal where every hero weapon is vertical.
+    const span = 0.82;
     b.add(
       shell({
         nu: 5,
-        nv: 16,
+        nv: 14,
         surface: (u, v, out) => {
           const k = (v - 0.5) * 2;
-          const w = 0.055 * (1 - 0.75 * Math.abs(k));
-          // Recurve: the limbs bend back at the tips.
-          const bend = 0.3 * k * k + 0.1 * Math.pow(Math.abs(k), 6) * Math.sign(k) * 0;
-          out.set(k * span * 0.5, (u - 0.5) * w * 2, -bend + 0.16 * Math.pow(Math.abs(k), 3.2));
+          const w = 0.04 * (1 - 0.7 * Math.abs(k));
+          out.set(k * span * 0.5, (u - 0.5) * w * 2, 0.19 * k * k + 0.1 * Math.pow(Math.abs(k), 4));
         },
-        thickness: (_u, v) => 0.028 * (1 - 0.6 * Math.abs((v - 0.5) * 2)) + 0.006,
+        thickness: (_u, v) => 0.024 * (1 - 0.55 * Math.abs((v - 0.5) * 2)) + 0.006,
         uvScale: 2.4,
         smoothAngle: 44,
       }),
       {
         slot: 'metal',
         bone: 'hand.L',
-        at: [0.02, -0.02, 0.13],
-        rot: [0.16, 0, 0.14],
+        at: [0.02, 0.0, 0.2],
+        rot: [0.16, 0, 0.1],
         bind: { bones: ['hand.L'], rigid: true },
         uvScale: 1,
       },
     );
-    b.add(prism({ h: 0.16, w0: 0.032, d0: 0.05, w1: 0.032, d1: 0.05, round: 5, segments: 6 }), {
+    // Stock, running back from the bow toward the shoulder.
+    b.add(prism({ h: 0.46, w0: 0.05, d0: 0.045, w1: 0.036, d1: 0.06, round: 4, segments: 6 }), {
       slot: 'leather',
       bone: 'hand.L',
-      at: [0.02, -0.1, 0.13],
-      rot: [0.16, 0, 0.14],
+      at: [0.02, -0.02, 0.2],
+      rot: [Math.PI / 2 + 0.16, 0, 0.1],
       bind: { bones: ['hand.L'], rigid: true },
-      uvScale: 1,
+      uvScale: 1.3,
+    });
+    b.add(spike({ length: 0.34, baseW: 0.016, curve: 0, taper: 2.4, segments: 5 }), {
+      slot: 'metal',
+      bone: 'hand.L',
+      at: [0.02, 0.035, 0.16],
+      rot: [Math.PI / 2 + 0.16, 0, 0.1],
+      bind: { bones: ['hand.L'], rigid: true },
+      uvScale: 0.6,
     });
   },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7. Duskrunner — fast creep
+// 7. Huargo — fast creep (QUADRUPED)
+//
+// SILHOUETTE HOOK: the only body in the game that is longer than it is tall.
+// Two metres of back from tail tip to muzzle, carried at 1.2 m, with the head
+// out in FRONT of the forelegs and the tail streaming behind.
+//
+// Shape variety at 79 px comes from skeleton layout, not decoration, and this
+// is the one that buys it: every other figure is a vertical stack, so the wolf
+// is identifiable before a single feature resolves.
+//
+// HOW IT USES A BIPED RIG (no new bones): a large `stoop` throws the chest
+// 0.77 m forward of the pelvis, which turns the spine chain into a horizontal
+// backbone; the arm chain then hangs off the forward chest as the forelegs, and
+// the leg chain stays under the pelvis as the hind legs. The animator swings
+// the arms about the shoulder during locomotion, which is exactly what a
+// foreleg does. The costs are stated in the report: the forelegs are swung, not
+// IK-planted, so they slide a little at walk speed, and `lean` is kept small
+// because pitching this spine lifts the whole chest rather than the chin.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DUSK_PALETTE: Palette = {
-  primary: 0x453a4c,
-  secondary: 0x9c3070,
-  accent: 0xc9bda2,
-  emissive: 0xff4fa3,
+const WOLF_PALETTE: Palette = {
+  primary: 0x4c4740,
+  secondary: 0x2b2722,
+  accent: 0xbfae8e,
+  emissive: 0xffb03a,
 };
 
 const duskrunner: CharacterDef = {
   id: 'creep.duskrunner',
-  name: 'Duskrunner',
+  name: 'Huargo',
   kind: 'creep',
   archetype: 'fast',
   proportions: prop({
-    height: 1.72,
+    height: 1.9,
     legType: 'digitigrade',
-    legFraction: 0.56,
-    hipHalfWidth: 0.13,
-    shoulderHalfWidth: 0.21,
-    torsoFraction: 0.26,
-    neckLength: 0.08,
-    headSize: 0.145,
-    armFraction: 0.44,
-    stoop: 0.68,
-    hockOffset: 0.17,
+    legFraction: 0.55,
+    hipHalfWidth: 0.155,
+    shoulderHalfWidth: 0.19,
+    // Short vertical torso, extreme stoop: together these lay the spine down.
+    torsoFraction: 0.105,
+    neckLength: 0.05,
+    headSize: 0.19,
+    // Forelegs must reach the ground from a chest carried at 1.24 m.
+    armFraction: 0.72,
+    stoop: 8,
+    hockOffset: 0.2,
     footLength: 0.3,
-    tailSegments: 4,
+    tailSegments: 5,
   }),
   profile: profile({
     idlePeriod: 2.1,
-    breath: 0.7,
+    breath: 0.8,
     stanceWidth: 0.95,
-    crouch: 0.62,
-    armSplay: 0.2,
+    crouch: 0.2,
+    // Forelegs hang, they do not splay: a splayed foreleg reads as an arm.
+    armSplay: 0.06,
     walkSpeed: 4.6,
     runSpeed: 8.4,
-    stride: 1.5,
-    stanceFraction: 0.42,
-    bob: 0.05,
-    lean: 0.26,
-    armSwing: 0.5,
-    footLift: 0.24,
+    stride: 1.35,
+    stanceFraction: 0.4,
+    bob: 0.045,
+    lean: 0.07,
+    armSwing: 0.34,
+    footLift: 0.2,
     attackDuration: 0.62,
     attackStyle: 'claw',
     castDuration: 1.0,
     castStyle: 'hurl',
-    weight: 0.12,
-    tailSegments: 4,
+    weight: 0.14,
+    tailSegments: 5,
   }),
   slots: {
-    armor: slot('unit.leather', { tint: 'primary', roughness: 0.55, metalness: 0 }),
+    armor: slot('unit.leather', { tint: 'primary', roughness: 0.75, metalness: 0 }),
     cloth: slot('unit.cloth', { tint: 'secondary', metalness: 0 }),
-    leather: slot('unit.leather', { tint: 'primary', shade: 0.75, metalness: 0 }),
-    metal: slot('unit.steel', { tint: 'none', roughness: 0.3, metalness: 1 }),
-    flesh: slot('unit.skin', { tint: 'primary', shade: 1.2, metalness: 0 }),
+    leather: slot('unit.leather', { tint: 'secondary', metalness: 0 }),
+    metal: slot('unit.bone', { tint: 'accent', roughness: 0.55, metalness: 0 }),
+    flesh: slot('unit.skin', { tint: 'primary', shade: 1.05, metalness: 0 }),
     glow: slot('unit.bone', { tint: 'none', metalness: 0, emissiveIntensity: 4 }),
   },
-  palette: DUSK_PALETTE,
-  visual: visual('creep.duskrunner', 'low-horizontal-arrow-tail', DUSK_PALETTE, 1, ['leather', 'cloth']),
+  palette: WOLF_PALETTE,
+  visual: visual('creep.duskrunner', 'quadruped-long-back-tail', WOLF_PALETTE, 1, ['leather', 'skin']),
   build(b, rig) {
     const p = rig.proportions;
+    const hs = p.headSize;
+    // No torso and no head from the shared assembly: an upright column is the
+    // one thing this body plan must not have. Arms and legs still come from it,
+    // because fore and hind legs are exactly the segments it already builds.
     addBody(b, rig, {
-      torsoSlot: 'armor',
+      torsoSlot: 'flesh',
       limbSlot: 'flesh',
       handSlot: 'flesh',
-      headSlot: 'flesh',
-      bootSlot: 'leather',
+      bootSlot: 'flesh',
       round: 3,
-      chestScale: 0.94,
-      waistScale: 0.76,
-      armScale: 0.66,
-      legScale: 0.78,
+      armScale: 0.74,
+      legScale: 0.74,
       handScale: 0.95,
-      bootScale: 0.95,
-      depthRatio: 0.7,
+      bootScale: 0.85,
       digitigrade: true,
+      torso: false,
+      neck: false,
       head: false,
     });
 
     const pelvis = rw(rig, B.pelvis);
+    const chest = rw(rig, B.chest);
 
-    // Narrow wedge skull with a swept-back crest.
+    // ── Backbone: the body is a barrel swept along the pelvis→chest line, with
+    // its sections held perpendicular to that line so the back reads as one
+    // continuous horizontal mass rather than a stack of discs.
+    const dy = chest[1] - pelvis[1];
+    const dz = chest[2] - pelvis[2];
+    const tilt = Math.atan2(dz, dy);
+    const spineRing = (t: number, w: number, d: number, round = 3.2): Ring => ({
+      y: pelvis[1] + dy * t,
+      z: pelvis[2] + dz * t,
+      w,
+      d,
+      round,
+      tiltX: tilt,
+    });
+    b.add(
+      roughen(
+        loft(
+          [
+            spineRing(-0.52, 0.12, 0.125),
+            spineRing(-0.22, 0.215, 0.205),
+            spineRing(0.16, 0.2, 0.19),
+            spineRing(0.52, 0.185, 0.19),
+            spineRing(0.86, 0.23, 0.225),
+            spineRing(1.14, 0.215, 0.21),
+            spineRing(1.38, 0.135, 0.14),
+          ],
+          { segments: 12, smoothAngle: 50 },
+        ),
+        0.012,
+        6,
+        4,
+      ),
+      {
+        slot: 'flesh',
+        bind: { bones: [B.chest, B.spine, B.pelvis], falloff: 0.34, bias: 1.1 },
+        uvScale: 1.7,
+      },
+    );
+
+    // ── Neck: thick, short and carried a little below the shoulder line, the
+    // way a running wolf's is. Low enough to read as a separate shape from the
+    // back, high enough that the back does not hide it from a camera looking
+    // down at 50 degrees.
+    const headP = rw(rig, B.head);
+    const skullDrop = 0.22;
+    const skullPush = 0.42;
     b.add(
       loft(
         [
-          { y: -p.headSize * 0.6, w: p.headSize * 0.42, d: p.headSize * 0.5, z: p.headSize * 0.5, round: 3 },
-          { y: -p.headSize * 0.1, w: p.headSize * 0.78, d: p.headSize * 0.9, z: p.headSize * 0.28, round: 3 },
-          { y: p.headSize * 0.4, w: p.headSize * 0.72, d: p.headSize * 0.86, z: -p.headSize * 0.1, round: 3.2 },
-          { y: p.headSize * 0.72, w: p.headSize * 0.34, d: p.headSize * 0.44, z: -p.headSize * 0.28, round: 3 },
+          { y: chest[1] + 0.04, z: chest[2] + 0.04, w: 0.19, d: 0.2, round: 3.2, tiltX: 1.05 },
+          { y: chest[1] - 0.02, z: chest[2] + 0.22, w: 0.155, d: 0.165, round: 3.2, tiltX: 1.3 },
+          { y: headP[1] - skullDrop + 0.02, z: chest[2] + skullPush * 0.82, w: 0.125, d: 0.13, round: 3.2, tiltX: 1.4 },
+        ],
+        { segments: 10, smoothAngle: 52 },
+      ),
+      {
+        slot: 'flesh',
+        bind: { bones: [B.neck, B.chest, B.head], falloff: 0.26, bias: 1.3 },
+        uvScale: 1.3,
+      },
+    );
+
+    // ── Skull: a wedge with a long muzzle, built pointing along +Y and laid
+    // forward by the placement rotation, so the whole head is one horizontal
+    // shape. Two upright ears keep the top outline from reading as a lizard.
+    b.add(
+      loft(
+        [
+          { y: 0, w: hs * 0.46, d: hs * 0.48, round: 3 },
+          { y: hs * 0.5, w: hs * 0.62, d: hs * 0.56, round: 3.4 },
+          { y: hs * 1.0, w: hs * 0.44, d: hs * 0.48, round: 3.2 },
+          { y: hs * 1.8, w: hs * 0.3, d: hs * 0.34, round: 3.2 },
+          { y: hs * 2.4, w: hs * 0.24, d: hs * 0.27, round: 3 },
         ],
         { segments: 10, smoothAngle: 54 },
       ),
       {
         slot: 'flesh',
         bone: B.head,
-        at: [0, p.headSize * 0.35, 0],
+        at: [0, -skullDrop, skullPush],
+        rot: [Math.PI / 2 - 0.1, 0, 0],
+        bind: { bones: [B.head], rigid: true },
+        uvScale: 1.1,
+      },
+    );
+    // Lower jaw, hung open a crack: two dark lines under the muzzle.
+    b.add(
+      loft(
+        [
+          { y: 0, w: hs * 0.36, d: hs * 0.21, round: 3 },
+          { y: hs * 1.0, w: hs * 0.28, d: hs * 0.18, round: 3 },
+          { y: hs * 2.15, w: hs * 0.18, d: hs * 0.13, round: 3 },
+        ],
+        { segments: 8, smoothAngle: 54 },
+      ),
+      {
+        slot: 'flesh',
+        bone: B.head,
+        at: [0, -skullDrop - 0.1, skullPush + 0.03],
+        rot: [Math.PI / 2 + 0.07, 0, 0],
         bind: { bones: [B.head], rigid: true },
         uvScale: 1,
       },
     );
-    b.add(
-      shell({
-        nu: 5,
-        nv: 7,
-        surface: (u, v, out) => {
-          out.set((u - 0.5) * 0.03, p.headSize * (0.5 + v * 0.5), -p.headSize * (0.1 + v * 1.7));
-        },
-        thickness: (_u, v) => 0.016 * (1 - v * 0.7),
-        uvScale: 1.4,
-        smoothAngle: 40,
-      }),
-      {
+    for (const sz of [0, 1]) {
+      b.add(spike({ length: hs * 0.34, baseW: hs * 0.08, curve: 0.1, taper: 1.6, segments: 5 }), {
         slot: 'metal',
         bone: B.head,
-        at: [0, p.headSize * 0.35, 0],
+        at: [
+          hs * 0.24,
+          -skullDrop - 0.05 + (sz === 0 ? -0.01 : 0.01),
+          skullPush + hs * (sz === 0 ? 1.15 : 1.6),
+        ],
+        rot: [Math.PI, 0, 0],
+        mirror: true,
         bind: { bones: [B.head], rigid: true },
-        uvScale: 1,
-      },
-    );
-    b.add(gem(0.022, 0), {
+        uvScale: 0.5,
+      });
+    }
+    // Ears: upright and splayed wide. Seen from above they are the only part
+    // of this animal that is not a smooth tube, so they are oversized.
+    b.add(spike({ length: hs * 1.25, baseW: hs * 0.3, curve: -0.35, taper: 1.5, segments: 5 }), {
+      slot: 'flesh',
+      bone: B.head,
+      at: [hs * 0.32, -skullDrop + 0.06, skullPush + 0.02],
+      rot: [-0.3, 0, -0.55],
+      mirror: true,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 0.6,
+    });
+    b.add(gem(0.024, 0), {
       slot: 'glow',
       bone: B.head,
-      at: [p.headSize * 0.34, p.headSize * 0.5, p.headSize * 0.5],
+      at: [hs * 0.3, -skullDrop + 0.03, skullPush + hs * 0.85],
       mirror: true,
       bind: { bones: [B.head], rigid: true },
       uvScale: 1,
     });
 
-    // ── Tail: the long horizontal element nothing else in the line-up has.
+    // ── Ruff: a collar of raised fur over the shoulders. It thickens the front
+    // of the animal so the profile is heavy at the chest and light at the hips,
+    // which is the proportion that separates a wolf from a big cat.
+    for (let i = 0; i < 9; i++) {
+      const a = -1.5 + (i / 8) * 3.0;
+      b.add(spike({ length: 0.2 + Math.cos(a) * 0.1, baseW: 0.062, curve: -0.5, taper: 1.9, segments: 5 }), {
+        slot: 'armor',
+        at: [
+          Math.sin(a) * 0.21,
+          chest[1] + 0.09 + Math.cos(a) * 0.05,
+          chest[2] - 0.02 - Math.cos(a) * 0.04,
+        ],
+        rot: [-1.0, 0, -a * 0.75],
+        bind: { bones: [B.chest], rigid: true },
+        uvScale: 0.8,
+      });
+    }
+
+    // ── Tail: five segments streaming off the back of the pelvis. The one
+    // element that continues the horizontal line past the hind legs.
     const segs = p.tailSegments;
     for (let i = 0; i < segs; i++) {
       const t = i / segs;
       const len = boneDistance(rig, `tail${i}`, i + 1 < segs ? `tail${i + 1}` : `tail${i}`) || 0.14;
       b.add(
         limbGeo({
-          len: Math.max(0.1, len) * 1.05,
-          topW: 0.062 * (1 - t * 0.7),
-          topD: 0.07 * (1 - t * 0.7),
-          botW: 0.05 * (1 - (t + 0.25) * 0.7),
-          botD: 0.055 * (1 - (t + 0.25) * 0.7),
+          len: Math.max(0.1, len) * 1.1,
+          topW: 0.085 * (1 - t * 0.55),
+          topD: 0.095 * (1 - t * 0.55),
+          botW: 0.08 * (1 - (t + 0.2) * 0.62),
+          botD: 0.088 * (1 - (t + 0.2) * 0.62),
           round: 3,
           segments: 8,
         }),
         {
           slot: 'flesh',
+          // +PI/2, not -PI/2: `limbGeo` grows along -Y, so the negative angle
+          // laid every segment FORWARD over the body and bound it to the bone
+          // behind the one it covered. The whole tail was a segment out of step.
           bone: `tail${i}`,
-          rot: [-Math.PI / 2, 0, 0],
-          bind: { bones: [`tail${i}`, i + 1 < segs ? `tail${i + 1}` : `tail${i}`], falloff: 0.09, bias: 1.4 },
+          rot: [Math.PI / 2, 0, 0],
+          bind: { bones: [`tail${i}`, i + 1 < segs ? `tail${i + 1}` : `tail${i}`], falloff: 0.11, bias: 1.4 },
           uvScale: 1.1,
         },
       );
     }
-    b.add(spike({ length: 0.24, baseW: 0.035, curve: 0.2, taper: 1.6, segments: 5 }), {
-      slot: 'metal',
-      bone: `tail${segs - 1}`,
-      rot: [-Math.PI / 2, 0, 0],
-      bind: { bones: [`tail${segs - 1}`], rigid: true },
-      uvScale: 0.7,
-    });
 
-    // Hip wrap and trailing ribbons.
-    clothPanel(b, rig, {
-      slot: 'cloth',
-      bones: [B.pelvis],
-      topY: pelvis[1] + 0.06,
-      bottomY: pelvis[1] - 0.26,
-      topW: 0.24,
-      bottomW: 0.16,
-      z: p.hipHalfWidth * 0.95,
-      hemPoint: 0.4,
-      thickness: 0.009,
-    });
-    for (const sx of [-1, 1]) {
-      b.add(
-        shell({
-          nu: 3,
-          nv: 8,
-          surface: (u, v, out) => {
-            out.set((u - 0.5) * 0.05 * (1 - v * 0.5), -v * 0.42, -v * 0.3 - Math.sin(v * 3.4) * 0.05);
-          },
-          thickness: () => 0.008,
-          uvScale: 1.4,
-          smoothAngle: 44,
-        }),
-        {
-          slot: 'cloth',
-          bone: 'shoulder.L',
-          at: [sx * 0.02, 0.02, -0.05],
-          rot: [0, 0, 0],
-          bind: { bones: ['shoulder.L', B.chest], falloff: 0.16, bias: 1.3 },
-          uvScale: 1,
-        },
-      );
-    }
-
-    // ── Twin short blades, one per hand, angled back along the forearms.
-    b.add(blade({ length: 0.42, width: 0.11, thickness: 0.026, curve: 0.28, belly: 0.4, tip: 0.14, heel: 0.6 }), {
-      slot: 'metal',
-      bone: 'hand.L',
-      at: [0, -0.05, 0.03],
-      rot: [-0.35, 0, 0.2],
+    // Haunch mass over the hind legs, so the rear is not a bare stick joint.
+    b.add(sphereish(0.155, 10, 8, 0.92), {
+      slot: 'flesh',
+      at: [p.hipHalfWidth * 0.85, pelvis[1] - 0.06, pelvis[2] - 0.03],
+      bind: { bones: [B.pelvis, 'hip.L'], falloff: 0.14, bias: 1.5 },
       mirror: true,
-      bind: { bones: ['hand.L'], rigid: true },
       uvScale: 1.2,
     });
   },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 8. Bastion Hulk — tank creep
+// 8. Ogro — tank creep
+//
+// SILHOUETTE HOOK: a gut wider than his own shoulders, a head far too small for
+// it, and a tree-trunk club laid over one shoulder as a hard diagonal.
+//
+// He fights beside the orc and must never be mistaken for one, so the contrast
+// is built from three independent axes: he is a third taller, his widest point
+// is at the waist instead of the shoulders, and his weapon goes UP from the
+// hand while the orc's hangs down. Round, tall and top-heavy against angular,
+// short and bottom-heavy.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BASTION_PALETTE: Palette = {
-  primary: 0x5a564d,
-  secondary: 0x322e28,
+const OGRE_PALETTE: Palette = {
+  primary: 0x8a7550,
+  secondary: 0x3d3529,
   accent: 0x9a4c1e,
   emissive: 0xff6a1f,
 };
 
 const bastion: CharacterDef = {
   id: 'creep.bastion',
-  name: 'Bastion Hulk',
+  name: 'Ogro',
   kind: 'creep',
   archetype: 'tank',
   proportions: prop({
-    height: 2.0,
-    legFraction: 0.33,
-    hipHalfWidth: 0.27,
+    height: 2.35,
+    legFraction: 0.34,
+    hipHalfWidth: 0.3,
     shoulderHalfWidth: 0.5,
-    torsoFraction: 0.36,
-    neckLength: 0.015,
-    headSize: 0.15,
-    armFraction: 0.56,
-    stoop: 0.5,
-    footLength: 0.3,
+    torsoFraction: 0.4,
+    // Not zero: a head this small, sunk level with shoulders this wide, is
+    // simply not on screen from a camera above it. It has to clear them.
+    neckLength: 0.13,
+    headSize: 0.2,
+    armFraction: 0.58,
+    stoop: 0.6,
+    footLength: 0.36,
   }),
   profile: profile({
     idlePeriod: 5.6,
     breath: 1.8,
     stanceWidth: 1.7,
-    crouch: 0.7,
-    armSplay: 0.52,
+    crouch: 0.6,
+    armSplay: 0.55,
     walkSpeed: 2.1,
     runSpeed: 3.3,
-    stride: 0.9,
+    stride: 1.0,
     stanceFraction: 0.7,
-    bob: 0.085,
+    bob: 0.09,
     lean: 0.05,
-    armSwing: 0.28,
+    armSwing: 0.26,
     footLift: 0.1,
     attackDuration: 1.55,
     attackStyle: 'slam',
@@ -1842,171 +2165,251 @@ const bastion: CharacterDef = {
     weight: 1,
   }),
   slots: {
-    armor: slot('unit.chitin', { tint: 'primary', roughness: 0.62, metalness: 0.15 }),
+    armor: slot('unit.leather', { tint: 'secondary', roughness: 0.75, metalness: 0 }),
     cloth: slot('unit.cloth', { tint: 'secondary', metalness: 0 }),
-    leather: slot('unit.leather', { tint: 'secondary', metalness: 0 }),
+    leather: slot('unit.leather', { tint: 'secondary', shade: 1.3, metalness: 0 }),
     metal: slot('unit.steel', { tint: 'accent', roughness: 0.55, metalness: 1 }),
-    flesh: slot('unit.skin', { tint: 'primary', shade: 0.9, metalness: 0 }),
+    flesh: slot('unit.skin', { tint: 'primary', shade: 0.95, metalness: 0 }),
     glow: slot('unit.bone', { tint: 'none', metalness: 0, emissiveIntensity: 3.6 }),
   },
-  palette: BASTION_PALETTE,
-  visual: visual('creep.bastion', 'squat-dome-no-neck', BASTION_PALETTE, 1, ['chitin', 'steel']),
+  palette: OGRE_PALETTE,
+  visual: visual('creep.bastion', 'pot-bellied-ogre-club', OGRE_PALETTE, 1, ['skin', 'leather']),
   build(b, rig) {
     const p = rig.proportions;
+    const hs = p.headSize;
     addBody(b, rig, {
       torsoSlot: 'flesh',
       limbSlot: 'flesh',
       handSlot: 'flesh',
-      headSlot: 'flesh',
       bootSlot: 'leather',
-      round: 4.4,
-      chestScale: 1.12,
-      waistScale: 1.15,
-      armScale: 1.5,
-      legScale: 1.55,
-      handScale: 2.5,
+      round: 4.2,
+      chestScale: 1.02,
+      // The gut: the torso's waist ring is the widest section on the body.
+      waistScale: 1.5,
+      armScale: 1.6,
+      legScale: 1.7,
+      handScale: 2.3,
       bootScale: 1.5,
-      depthRatio: 0.94,
+      depthRatio: 0.92,
       neck: false,
-      headScale: 0.9,
+      head: false,
     });
 
     const chest = rw(rig, B.chest);
+    const pelvis = rw(rig, B.pelvis);
+    const bellyY = pelvis[1] + (chest[1] - pelvis[1]) * 0.3;
 
-    // ── Carapace: a single dome swallowing the shoulders and most of the head.
-    const dome = roughen(
+    // ── Belly overhang: a second mass in front of the torso so the gut hangs
+    // over the belt instead of being a wide tube.
+    b.add(roughen(sphereish(0.44, 14, 10, 0.82), 0.02, 5.5, 3), {
+      slot: 'flesh',
+      at: [0, bellyY - 0.04, p.hipHalfWidth * 0.5],
+      bind: { bones: [B.spine, B.pelvis, B.chest], falloff: 0.3, bias: 1.2 },
+      uvScale: 1.9,
+    });
+
+    // Shoulder muscle: two bare domes. No armour anywhere on this creature —
+    // plates would read as the orc's pauldron at distance.
+    b.add(
+      roughen(
+        loft(
+          [
+            { y: -0.2, w: 0.2, d: 0.21, round: 4.5 },
+            { y: -0.02, w: 0.26, d: 0.27, round: 5 },
+            { y: 0.14, w: 0.19, d: 0.2, round: 4.5 },
+          ],
+          { segments: 12, smoothAngle: 46 },
+        ),
+        0.014,
+        7,
+        5,
+      ),
+      {
+        slot: 'flesh',
+        bone: 'shoulder.L',
+        at: [0.05, 0.06, 0],
+        rot: [0, 0, -0.3],
+        mirror: true,
+        bind: { bones: ['shoulder.L'], rigid: true },
+        uvScale: 1.5,
+      },
+    );
+
+    // ── Head: small, bald, sunk between the shoulders, with the jaw jutting
+    // out under it and one broken lower tusk.
+    b.add(
       loft(
         [
-          { y: -0.26, w: p.shoulderHalfWidth * 1.16, d: p.shoulderHalfWidth * 0.94, z: -0.04, round: 4.6 },
-          { y: 0.02, w: p.shoulderHalfWidth * 1.3, d: p.shoulderHalfWidth * 1.05, z: -0.06, round: 5 },
-          { y: 0.24, w: p.shoulderHalfWidth * 1.14, d: p.shoulderHalfWidth * 0.94, z: -0.09, round: 5 },
-          { y: 0.38, w: p.shoulderHalfWidth * 0.66, d: p.shoulderHalfWidth * 0.58, z: -0.12, round: 4 },
+          { y: -hs * 0.6, w: hs * 0.78, d: hs * 0.84, z: hs * 0.3, round: 3.4 },
+          { y: -hs * 0.2, w: hs * 0.95, d: hs * 1.02, z: hs * 0.14, round: 3.6 },
+          { y: hs * 0.3, w: hs * 0.88, d: hs * 0.92, z: 0, round: 3.6 },
+          { y: hs * 0.66, w: hs * 0.46, d: hs * 0.5, z: -hs * 0.08, round: 3 },
         ],
-        { segments: 14, smoothAngle: 44 },
+        { segments: 10, smoothAngle: 50 },
       ),
-      0.018,
-      6.5,
-      3,
+      {
+        slot: 'flesh',
+        bone: B.head,
+        at: [0, hs * 0.2, hs * 0.16],
+        bind: { bones: [B.head], rigid: true },
+        uvScale: 1,
+      },
     );
-    b.add(dome, {
-      slot: 'armor',
-      at: [0, chest[1] + 0.06, 0],
-      bind: { bones: [B.chest], rigid: true },
-      uvScale: 1.8,
-    });
-    spikeRow(b, rig, {
-      bone: B.chest,
-      count: 5,
-      from: [-p.shoulderHalfWidth * 0.9, chest[1] + 0.3, -0.12],
-      to: [p.shoulderHalfWidth * 0.9, chest[1] + 0.3, -0.12],
-      length: 0.4,
-      baseW: 0.062,
+    // Undershot jaw thrown forward: the head is a wedge from above, which is
+    // the only angle this creature is ever seen from.
+    b.add(
+      loft(
+        [
+          { y: 0, w: hs * 0.7, d: hs * 0.42, round: 3.4 },
+          { y: hs * 0.28, w: hs * 0.78, d: hs * 0.46, round: 3.4 },
+          { y: hs * 0.5, w: hs * 0.54, d: hs * 0.34, round: 3.2 },
+        ],
+        { segments: 8, smoothAngle: 50 },
+      ),
+      {
+        slot: 'flesh',
+        bone: B.head,
+        at: [0, -hs * 0.34, hs * 0.5],
+        rot: [Math.PI / 2 - 0.35, 0, 0],
+        bind: { bones: [B.head], rigid: true },
+        uvScale: 1,
+      },
+    );
+    // Two tusks out of that jaw, one snapped short: the asymmetry is a second
+    // read, and swept outward they clear the shoulder domes.
+    b.add(spike({ length: hs * 1.25, baseW: hs * 0.2, curve: 0.35, taper: 1.7, segments: 5 }), {
       slot: 'metal',
-      curve: -0.5,
-      tilt: -0.35,
-      bind: [B.chest],
+      bone: B.head,
+      at: [hs * 0.34, -hs * 0.36, hs * 0.86],
+      rot: [0.35, 0, -0.8],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 0.6,
     });
-
-    // Overlapping chest bands.
-    for (let i = 0; i < 3; i++) {
-      b.add(
-        plate({
-          width: p.shoulderHalfWidth * (1.5 - i * 0.16),
-          height: 0.15,
-          thickness: 0.028,
-          bow: 0.34,
-          topScale: 1.05,
-          bottomScale: 0.85,
-        }),
-        {
-          slot: 'armor',
-          at: [0, chest[1] - 0.18 - i * 0.15, 0.04],
-          rot: [0.12, 0, 0],
-          bind: { bones: [B.chest, B.spine, B.pelvis], falloff: 0.24, bias: 1.3 },
-          uvScale: 1.3,
-        },
-      );
-    }
-
-    // Tiny head, buried; only the jaw and two eye points read.
-    b.add(gem(0.026, 0), {
+    b.add(spike({ length: hs * 0.5, baseW: hs * 0.2, curve: 0.2, taper: 1.3, segments: 5 }), {
+      slot: 'metal',
+      bone: B.head,
+      at: [-hs * 0.34, -hs * 0.36, hs * 0.86],
+      rot: [0.35, 0, 0.8],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 0.6,
+    });
+    b.add(plate({ width: hs * 0.98, height: hs * 0.28, thickness: hs * 0.05, bow: 0.26, bottomScale: 0.82 }), {
+      slot: 'armor',
+      bone: B.head,
+      at: [0, hs * 0.12, hs * 0.6],
+      rot: [0.12, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1.2,
+    });
+    b.add(gem(0.024, 0), {
       slot: 'glow',
       bone: B.head,
-      at: [p.headSize * 0.42, p.headSize * 0.4, p.headSize * 0.68],
+      at: [hs * 0.28, hs * 0.2, hs * 0.96],
       mirror: true,
       bind: { bones: [B.head], rigid: true },
       uvScale: 1,
     });
 
-    // ── Fists: enormous, knuckle-plated, hanging near the ground.
+    // Hide kilt, hung low under the gut.
+    clothPanel(b, rig, {
+      slot: 'armor',
+      bones: [B.pelvis, B.spine],
+      topY: pelvis[1] + 0.06,
+      bottomY: pelvis[1] - 0.44,
+      topW: 0.6,
+      bottomW: 0.5,
+      z: p.hipHalfWidth * 1.35,
+      hemPoint: 0.3,
+      thickness: 0.018,
+    });
+    b.add(torus(p.hipHalfWidth * 1.5, 0.05, 6, 18), {
+      slot: 'leather',
+      at: [0, pelvis[1] + 0.12, 0],
+      rot: [Math.PI / 2, 0, 0],
+      bind: { bones: [B.pelvis, B.spine], falloff: 0.2, bias: 1.3 },
+      uvScale: 1.4,
+    });
+
+    // ── Club: a whole tree, gripped low and carried up over the right
+    // shoulder. The diagonal is half of this creature's read at distance.
+    const clubRot: [number, number, number] = [-0.38, 0, 0.16];
     b.add(
-      loft(
-        [
-          { y: -0.2, w: 0.17, d: 0.19, round: 5 },
-          { y: -0.04, w: 0.21, d: 0.23, round: 5.4 },
-          { y: 0.1, w: 0.17, d: 0.19, round: 5 },
-        ],
-        { segments: 10, smoothAngle: 44 },
+      roughen(
+        loft(
+          [
+            { y: -0.1, w: 0.05, d: 0.05, round: 5 },
+            { y: 0.5, w: 0.075, d: 0.075, round: 5 },
+            { y: 1.05, w: 0.15, d: 0.16, round: 5 },
+            { y: 1.45, w: 0.19, d: 0.2, round: 5.5 },
+            { y: 1.62, w: 0.14, d: 0.15, round: 5 },
+          ],
+          { segments: 10, smoothAngle: 48 },
+        ),
+        0.02,
+        4.5,
+        7,
       ),
       {
-        slot: 'armor',
-        bone: 'wrist.L',
-        at: [0, -0.14, 0.02],
-        mirror: true,
-        bind: { bones: ['wrist.L', 'hand.L'], rigid: true },
-        uvScale: 1.3,
+        slot: 'leather',
+        bone: 'hand.R',
+        at: [0, -0.12, 0.04],
+        rot: clubRot,
+        bind: { bones: ['hand.R'], rigid: true },
+        uvScale: 1.8,
       },
     );
-    for (let i = 0; i < 3; i++) {
-      b.add(spike({ length: 0.14, baseW: 0.042, curve: 0, taper: 1.7, segments: 5 }), {
-        slot: 'metal',
-        bone: 'wrist.L',
-        at: [-0.06 + i * 0.06, -0.1, 0.2],
-        rot: [Math.PI / 2, 0, 0],
-        mirror: true,
-        bind: { bones: ['wrist.L'], rigid: true },
-        uvScale: 0.6,
+    // Broken branch stubs, so the club head is not a smooth egg.
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 0.4;
+      b.add(spike({ length: 0.2, baseW: 0.05, curve: 0.2, taper: 1.9, segments: 5 }), {
+        slot: 'leather',
+        bone: 'hand.R',
+        at: [Math.sin(a) * 0.16, -0.12 + 1.18 + Math.cos(a) * 0.06, 0.04 + Math.cos(a) * 0.16],
+        rot: [clubRot[0]! + Math.cos(a) * 1.1, 0, clubRot[2]! - Math.sin(a) * 1.1],
+        bind: { bones: ['hand.R'], rigid: true },
+        uvScale: 0.7,
       });
     }
-    b.add(prism({ h: 0.24, w0: 0.14, d0: 0.15, w1: 0.12, d1: 0.13, round: 5, segments: 8 }), {
-      slot: 'armor',
-      bone: 'elbow.L',
-      at: [0, -0.2, 0],
-      mirror: true,
-      bind: { bones: ['elbow.L', 'wrist.L'], rigid: true },
-      uvScale: 1.2,
-    });
   },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 9. Hexwright — caster creep
+// 9. Hechicero — caster creep
+//
+// SILHOUETTE HOOK: the hat. A brimmed cone two thirds the height of his own
+// torso, with a tip that bends forward, over a robe that reaches the ground and
+// a staff as tall as the hat.
+//
+// A pointed hat is the single most-recognised shape in fantasy and no hero
+// wears one — the Oracle has a crescent crown and Vesper a halo, both of which
+// sit flat on the skull. This one adds 0.68 m of cone above the head, so the
+// creature reads as "mago" from the outline of its top third alone.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const HEX_PALETTE: Palette = {
-  primary: 0x2e2450,
-  secondary: 0x6a6278,
+const MAGE_PALETTE: Palette = {
+  primary: 0x35275c,
+  secondary: 0x4e4560,
   accent: 0xa89c86,
   emissive: 0xb44dff,
 };
 
 const hexwright: CharacterDef = {
   id: 'creep.hexwright',
-  name: 'Hexwright',
+  name: 'Hechicero',
   kind: 'creep',
   archetype: 'caster',
   proportions: prop({
-    height: 2.18,
+    height: 1.95,
     legType: 'robe',
-    legFraction: 0.52,
-    hipHalfWidth: 0.16,
-    shoulderHalfWidth: 0.22,
-    torsoFraction: 0.27,
-    neckLength: 0.09,
-    headSize: 0.17,
-    armFraction: 0.52,
-    stoop: 0.16,
-    hover: 0.3,
+    legFraction: 0.5,
+    hipHalfWidth: 0.17,
+    shoulderHalfWidth: 0.24,
+    torsoFraction: 0.28,
+    neckLength: 0.05,
+    headSize: 0.165,
+    armFraction: 0.5,
+    stoop: 0.45,
+    hover: 0,
     capeSegments: 4,
     orbitCount: 3,
   }),
@@ -2015,7 +2418,7 @@ const hexwright: CharacterDef = {
     breath: 0.6,
     stanceWidth: 1,
     crouch: 0,
-    armSplay: 0.3,
+    armSplay: 0.26,
     walkSpeed: 2.8,
     runSpeed: 4.4,
     stride: 1,
@@ -2026,140 +2429,201 @@ const hexwright: CharacterDef = {
     attackStyle: 'thrust',
     castDuration: 1.7,
     castStyle: 'hurl',
-    weight: 0.2,
-    hover: true,
+    weight: 0.3,
     capeSegments: 4,
     orbitCount: 3,
     orbitRadius: 0.46,
   }),
   slots: {
-    armor: slot('unit.bone', { tint: 'accent', roughness: 0.6, metalness: 0 }),
+    armor: slot('unit.bone', { tint: 'accent', roughness: 0.68, metalness: 0 }),
     cloth: slot('unit.cloth', { tint: 'primary', metalness: 0 }),
-    leather: slot('unit.cloth', { tint: 'secondary', metalness: 0 }),
-    metal: slot('unit.bone', { tint: 'accent', roughness: 0.5, metalness: 0 }),
-    flesh: slot('unit.skin', { tint: 'secondary', shade: 0.8, metalness: 0 }),
+    leather: slot('unit.leather', { tint: 'secondary', metalness: 0 }),
+    metal: slot('unit.steel', { tint: 'accent', roughness: 0.42, metalness: 1 }),
+    flesh: slot('unit.skin', { tint: 'none', shade: 0.85, metalness: 0 }),
     glow: slot('unit.bone', { tint: 'none', metalness: 0, emissiveIntensity: 4.6 }),
   },
-  palette: HEX_PALETTE,
-  visual: visual('creep.hexwright', 'floating-spike-cluster', HEX_PALETTE, 1, ['cloth', 'bone']),
+  palette: MAGE_PALETTE,
+  visual: visual('creep.hexwright', 'pointed-hat-robe-staff', MAGE_PALETTE, 1, ['cloth', 'bone']),
   build(b, rig) {
     const p = rig.proportions;
+    const hs = p.headSize;
     addBody(b, rig, {
       torsoSlot: 'cloth',
-      limbSlot: 'flesh',
+      limbSlot: 'cloth',
       handSlot: 'flesh',
       headSlot: 'flesh',
-      round: 3.2,
-      chestScale: 0.9,
-      waistScale: 0.95,
-      armScale: 0.56,
-      handScale: 1.1,
-      depthRatio: 0.8,
-      head: false,
-      robe: { slot: 'cloth', flare: 0.3 },
+      round: 3.4,
+      chestScale: 0.92,
+      waistScale: 0.98,
+      armScale: 0.6,
+      handScale: 1.05,
+      depthRatio: 0.78,
+      head: true,
+      robe: { slot: 'cloth', flare: 0.34, hemNoise: 6 },
     });
 
     const chest = rw(rig, B.chest);
     const neck = rw(rig, B.neck);
 
-    // Tattered hem: separate strips below the robe so the outline is ragged and
-    // clearly not touching the ground.
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 7) * Math.PI * 2;
-      const r = p.hipHalfWidth * 1.42;
-      b.add(
-        shell({
-          nu: 3,
-          nv: 6,
-          surface: (u, v, out) => {
-            out.set((u - 0.5) * 0.09 * (1 - v * 0.6), -v * (0.16 + (i % 3) * 0.07), Math.sin(v * 2.6) * 0.03);
-          },
-          thickness: () => 0.007,
-          uvScale: 1.2,
-          smoothAngle: 44,
-        }),
-        {
-          slot: 'leather',
-          at: [Math.sin(a) * r, p.hover + 0.02, Math.cos(a) * r],
-          rot: [0, a, 0],
-          bind: { bones: ['skirt2', 'skirt1'].filter((n) => rig.index[n] !== undefined), falloff: 0.2, bias: 1.2 },
-          uvScale: 1,
+    // ── THE HAT. Brim first: a drooping disc wide enough to throw the face
+    // into shadow, which is what makes the beard read as the only light shape
+    // on the head.
+    b.add(
+      shell({
+        nu: 18,
+        nv: 4,
+        surface: (u, v, out) => {
+          const a = u * Math.PI * 2;
+          const r = 0.135 + v * 0.205;
+          out.set(Math.sin(a) * r, -v * v * 0.1 + Math.sin(a * 3) * v * 0.022, Math.cos(a) * r);
         },
-      );
-    }
-
-    // Hooded void where a face should be, with a single glowing slit.
+        thickness: (_u, v) => 0.016 * (1 - v * 0.45),
+        uvScale: 1.8,
+        smoothAngle: 42,
+      }),
+      {
+        slot: 'cloth',
+        bone: B.head,
+        at: [0, hs * 0.62, -hs * 0.05],
+        bind: { bones: [B.head], rigid: true },
+        uvScale: 1,
+      },
+    );
+    // Crown: a cone that leans forward as it narrows, so the tip overhangs the
+    // brim instead of standing to attention.
     b.add(
       loft(
         [
-          { y: -p.headSize * 0.9, w: p.headSize * 1.1, d: p.headSize * 1.1, round: 3.2 },
-          { y: -p.headSize * 0.2, w: p.headSize * 1.22, d: p.headSize * 1.24, z: -p.headSize * 0.08, round: 3.4 },
-          { y: p.headSize * 0.5, w: p.headSize * 0.86, d: p.headSize * 0.9, z: -p.headSize * 0.18, round: 3.2 },
-          { y: p.headSize * 0.92, w: p.headSize * 0.3, d: p.headSize * 0.34, z: -p.headSize * 0.34, round: 3 },
+          { y: 0, w: 0.155, d: 0.155, round: 3.6 },
+          { y: 0.13, w: 0.145, d: 0.145, round: 3.6 },
+          { y: 0.32, w: 0.11, d: 0.11, z: 0.025, round: 3.4 },
+          { y: 0.5, w: 0.07, d: 0.07, z: 0.095, round: 3.2 },
+          { y: 0.62, w: 0.036, d: 0.036, z: 0.185, round: 3 },
+          { y: 0.68, w: 0.012, d: 0.012, z: 0.265, round: 3 },
         ],
-        { segments: 12, smoothAngle: 50 },
+        { segments: 10, smoothAngle: 46 },
       ),
       {
         slot: 'cloth',
         bone: B.head,
-        at: [0, p.headSize * 0.3, 0],
-        bind: { bones: [B.head, B.neck], falloff: 0.16, bias: 1.6 },
+        at: [0, hs * 0.58, -hs * 0.05],
+        bind: { bones: [B.head], rigid: true },
         uvScale: 1.4,
       },
     );
-    b.add(prism({ h: 0.035, w0: 0.016, d0: p.headSize * 0.28, w1: 0.01, d1: p.headSize * 0.24, round: 4, segments: 5 }), {
-      slot: 'glow',
+    b.add(torus(0.158, 0.026, 5, 16), {
+      slot: 'metal',
       bone: B.head,
-      at: [0, p.headSize * 0.28, p.headSize * 0.86],
+      at: [0, hs * 0.62 + 0.05, -hs * 0.05],
       rot: [Math.PI / 2, 0, 0],
       bind: { bones: [B.head], rigid: true },
-      uvScale: 0.5,
+      uvScale: 1.2,
     });
 
-    // ── Antler headdress: four crooked, uneven spikes. Asymmetric on purpose.
-    const antlers: [number, number, number, number][] = [
-      [0.62, 0.9, -0.55, -0.34],
-      [-0.5, 0.78, -0.5, 0.28],
-      [0.34, 0.62, -0.72, -0.62],
-      [-0.26, 0.5, -0.68, 0.66],
-    ];
-    for (const [ax, len, curve, tilt] of antlers) {
-      b.add(spike({ length: p.headSize * 3.1 * len, baseW: p.headSize * 0.16, curve, taper: 1.6, twist: 0.5, segments: 7 }), {
-        slot: 'metal',
+    // ── Beard: a pale wedge hanging to the chest. Under the brim's shadow it
+    // is the brightest thing on the figure, which points at the face.
+    b.add(
+      loft(
+        [
+          { y: -0.46, w: hs * 0.14, d: hs * 0.14, z: hs * 0.36, round: 3 },
+          { y: -0.3, w: hs * 0.46, d: hs * 0.38, z: hs * 0.5, round: 3.2 },
+          { y: -0.12, w: hs * 0.62, d: hs * 0.5, z: hs * 0.56, round: 3.2 },
+          { y: 0.02, w: hs * 0.56, d: hs * 0.46, z: hs * 0.5, round: 3.2 },
+        ],
+        { segments: 10, smoothAngle: 48 },
+      ),
+      {
+        slot: 'armor',
         bone: B.head,
-        at: [p.headSize * ax, p.headSize * 0.6, -p.headSize * 0.2],
-        rot: [-0.42, 0, tilt],
+        at: [0, 0, 0],
         bind: { bones: [B.head], rigid: true },
-        uvScale: 0.8,
-      });
-    }
+        uvScale: 1.2,
+      },
+    );
+    b.add(gem(0.02, 0), {
+      slot: 'glow',
+      bone: B.head,
+      at: [hs * 0.28, hs * 0.16, hs * 0.66],
+      mirror: true,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1,
+    });
 
-    // Shoulder shroud and a long back drape.
-    b.add(plate({ width: 0.5, height: 0.3, thickness: 0.014, bow: 0.3, droop: 0.3, topScale: 0.6, bottomScale: 1.2 }), {
+    // Shoulder shroud, bell sleeves and a back drape: mass at the top of the
+    // robe so the figure is a triangle rather than a tube.
+    b.add(plate({ width: 0.54, height: 0.3, thickness: 0.016, bow: 0.3, droop: 0.32, topScale: 0.55, bottomScale: 1.25 }), {
       slot: 'cloth',
-      at: [0, neck[1] - 0.02, -0.02],
+      at: [0, neck[1] - 0.04, -0.02],
       rot: [0.1, 0, 0],
       bind: { bones: [B.chest, B.neck], falloff: 0.26, bias: 1.4 },
       uvScale: 1.4,
     });
-    cape(b, rig, { slot: 'leather', width: 0.34, length: p.height * 0.5, flare: 0.7, z: -0.04, thickness: 0.01 });
-
-    // Long thin claw fingers.
-    for (let i = 0; i < 3; i++) {
-      b.add(spike({ length: 0.15, baseW: 0.016, curve: 0.5, taper: 1.4, segments: 5 }), {
-        slot: 'metal',
-        bone: 'hand.L',
-        at: [(i - 1) * 0.026, -0.05, 0.02],
-        rot: [0.2, 0, (i - 1) * 0.3],
+    b.add(
+      loft(
+        [
+          { y: -0.3, w: 0.11, d: 0.11, round: 4 },
+          { y: -0.12, w: 0.135, d: 0.135, round: 4 },
+          { y: 0.06, w: 0.075, d: 0.075, round: 4 },
+        ],
+        { segments: 10, smoothAngle: 46 },
+      ),
+      {
+        slot: 'cloth',
+        bone: 'elbow.L',
+        at: [0, -0.1, 0],
         mirror: true,
-        bind: { bones: ['hand.L'], rigid: true },
+        bind: { bones: ['elbow.L', 'wrist.L'], rigid: true },
+        uvScale: 1.3,
+      },
+    );
+    cape(b, rig, { slot: 'leather', width: 0.36, length: p.height * 0.52, flare: 0.7, z: -0.04, thickness: 0.011 });
+
+    // ── Staff: gnarled, taller than the hat, with a caged ember on top. Held
+    // out from the body so it never merges with the robe's outline.
+    const staffLen = 1.72;
+    b.add(
+      loft(
+        [
+          { y: 0, w: 0.026, d: 0.026, round: 5 },
+          { y: staffLen * 0.3, w: 0.03, d: 0.03, x: 0.018, z: 0.012, round: 5 },
+          { y: staffLen * 0.58, w: 0.026, d: 0.026, x: -0.012, z: 0.02, round: 5 },
+          { y: staffLen * 0.84, w: 0.031, d: 0.031, x: 0.01, z: 0.004, round: 5 },
+          { y: staffLen, w: 0.024, d: 0.024, round: 5 },
+        ],
+        { segments: 7, smoothAngle: 50 },
+      ),
+      {
+        slot: 'leather',
+        bone: 'hand.R',
+        at: [0.03, -0.44, 0.08],
+        rot: [0.06, 0, -0.06],
+        bind: { bones: ['hand.R'], rigid: true },
+        uvScale: 2,
+      },
+    );
+    const orbY = -0.44 + staffLen + 0.1;
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + 0.4;
+      b.add(spike({ length: 0.19, baseW: 0.018, curve: -0.55, taper: 1.5, segments: 5 }), {
+        slot: 'metal',
+        bone: 'hand.R',
+        at: [0.03 + Math.sin(a) * 0.05, orbY - 0.12, 0.08 + Math.cos(a) * 0.05],
+        rot: [-Math.cos(a) * 0.5, 0, Math.sin(a) * 0.5],
+        bind: { bones: ['hand.R'], rigid: true },
         uvScale: 0.6,
       });
     }
+    b.add(gem(0.072, 1), {
+      slot: 'glow',
+      bone: 'hand.R',
+      at: [0.03, orbY, 0.08],
+      bind: { bones: ['hand.R'], rigid: true },
+      uvScale: 1,
+    });
 
-    // Orbiting hex shards.
+    // Orbiting runes, so a caster is identifiable even from behind.
     for (let i = 0; i < p.orbitCount; i++) {
-      b.add(gem(0.062, 0), {
+      b.add(gem(0.058, 0), {
         slot: 'glow',
         bone: `orbit${i}`,
         bind: { bones: [`orbit${i}`], rigid: true },
@@ -2171,82 +2635,104 @@ const hexwright: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 10. Marrow Titan — boss
+// 10. Dragón — boss (WINGED FLYER)
+//
+// SILHOUETTE HOOK: a wing span wider than the body is long, held a metre off
+// the ground with the talons hanging free. Nothing else in the game leaves the
+// floor, so "the one that flies" is the identification before the horns, the
+// tail or the scale of it register at all.
+//
+// The body is a horizontal barrel like the wolf's, for the same reason and by
+// the same trick (chest thrown forward of the pelvis by `stoop`), but read the
+// other way: the wolf is low and long, the dragon is high and spread.
+//
+// WINGS ON A BIPED RIG: each wing is bound rigidly to its shoulder bone, so it
+// inherits the shoulder's animation. On the Z axis (the flap axis) the idle's
+// breathing term drives a slow symmetric beat; on the X axis the arm-swing term
+// twists the angle of attack. `armSwing` is therefore kept very low — a normal
+// value would make the wings feather alternately, like rowing. A real flap
+// needs two bones per wing; the report states what that would cost.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Primary deliberately sits below the bone map's own mean: a brighter target
-// clamps the compensated tint at white and the sun blooms the whole figure out.
-const TITAN_PALETTE: Palette = {
-  primary: 0x968b72,
-  secondary: 0x3a352d,
-  accent: 0x7d2b2b,
-  emissive: 0x9cff5e,
+// Primary sits below the chitin map's own mean: a brighter target clamps the
+// compensated tint at white and the sun blooms the whole figure out.
+const DRAGON_PALETTE: Palette = {
+  primary: 0x6d2f2a,
+  secondary: 0x2e2622,
+  accent: 0xa98c52,
+  emissive: 0xff8a1f,
 };
 
 const titan: CharacterDef = {
   id: 'boss.marrowTitan',
-  name: 'Marrow Titan',
+  name: 'Dragón',
   kind: 'boss',
   archetype: 'boss',
   proportions: prop({
-    height: 3.7,
-    legFraction: 0.45,
-    hipHalfWidth: 0.3,
-    shoulderHalfWidth: 0.62,
-    torsoFraction: 0.32,
-    neckLength: 0.04,
-    headSize: 0.3,
-    armFraction: 0.52,
-    stoop: 0.24,
-    footLength: 0.44,
+    height: 3.0,
+    // Short legs held high: 1.1 m of daylight under the talons is the whole
+    // point of the creature, and long legs would turn into stilts that touch
+    // down and cancel it.
+    legFraction: 0.22,
+    hipHalfWidth: 0.28,
+    shoulderHalfWidth: 0.46,
+    torsoFraction: 0.16,
+    neckLength: 0.26,
+    headSize: 0.34,
+    // Short arm bones: the wings are authored geometry, the chain only orients
+    // them. A long chain here would swing the wing roots around.
+    armFraction: 0.26,
+    stoop: 3.2,
+    hover: 1.1,
+    tailSegments: 6,
+    footLength: 0.3,
   }),
   profile: profile({
-    idlePeriod: 6.2,
-    breath: 2.0,
-    stanceWidth: 1.6,
-    crouch: 0.45,
-    armSplay: 0.46,
+    idlePeriod: 4.0,
+    // Drives the symmetric wing beat: it is the only term on the flap axis.
+    breath: 2.2,
+    stanceWidth: 1.4,
+    crouch: 0,
+    armSplay: 0.08,
     walkSpeed: 2.4,
     runSpeed: 3.6,
     stride: 1.5,
     stanceFraction: 0.68,
-    bob: 0.1,
-    lean: 0.08,
-    armSwing: 0.4,
-    footLift: 0.18,
+    bob: 0.06,
+    lean: 0.05,
+    // Low on purpose: on a wing this axis is angle of attack, not swing.
+    armSwing: 0.1,
+    footLift: 0.1,
     attackDuration: 1.7,
-    attackStyle: 'slam',
+    attackStyle: 'claw',
     castDuration: 2.4,
     castStyle: 'summon',
     weight: 1,
-    mainHand: 'L',
+    hover: true,
+    tailSegments: 6,
   }),
   slots: {
-    armor: slot('unit.bone', { tint: 'primary', roughness: 0.58, metalness: 0 }),
-    cloth: slot('unit.cloth', { tint: 'secondary', metalness: 0 }),
+    armor: slot('unit.chitin', { tint: 'primary', roughness: 0.5, metalness: 0.2 }),
+    cloth: slot('unit.leather', { tint: 'secondary', shade: 1.2, metalness: 0 }),
     leather: slot('unit.leather', { tint: 'secondary', metalness: 0 }),
-    metal: slot('unit.steel', { tint: 'accent', roughness: 0.5, metalness: 1 }),
-    flesh: slot('unit.skin', { tint: 'secondary', shade: 1.1, metalness: 0 }),
+    metal: slot('unit.bone', { tint: 'accent', roughness: 0.5, metalness: 0 }),
+    flesh: slot('unit.skin', { tint: 'primary', shade: 0.8, metalness: 0 }),
     glow: slot('unit.bone', { tint: 'none', metalness: 0, emissiveIntensity: 3.4 }),
   },
-  palette: TITAN_PALETTE,
-  visual: visual('boss.marrowTitan', 'asymmetric-giant-maul-arm', TITAN_PALETTE, 1, ['bone', 'steel']),
+  palette: DRAGON_PALETTE,
+  visual: visual('boss.marrowTitan', 'winged-flyer-spread-wings', DRAGON_PALETTE, 1, ['chitin', 'bone']),
   build(b, rig) {
     const p = rig.proportions;
+    const hs = p.headSize;
     addBody(b, rig, {
       torsoSlot: 'flesh',
       limbSlot: 'flesh',
-      handSlot: 'flesh',
-      headSlot: 'armor',
       bootSlot: 'armor',
       round: 4,
-      chestScale: 1.0,
-      waistScale: 0.82,
-      armScale: 1.1,
-      legScale: 1.3,
-      handScale: 1.6,
-      bootScale: 1.4,
-      depthRatio: 0.78,
+      legScale: 0.78,
+      bootScale: 0.85,
+      torso: false,
+      arms: false,
       neck: false,
       head: false,
     });
@@ -2254,127 +2740,293 @@ const titan: CharacterDef = {
     const chest = rw(rig, B.chest);
     const pelvis = rw(rig, B.pelvis);
 
-    // ── Exposed ribcage: arcs wrapping the torso, the boss's signature texture.
-    for (let i = 0; i < 5; i++) {
-      const t = i / 4;
-      const y = chest[1] - 0.06 - t * 0.62;
-      const r = p.shoulderHalfWidth * (0.92 - t * 0.22);
-      b.add(
-        shell({
-          nu: 4,
-          nv: 12,
-          surface: (u, v, out) => {
-            const a = (v - 0.5) * Math.PI * 1.12;
-            out.set(Math.sin(a) * r, y + (u - 0.5) * 0.055 - Math.cos(a) * 0.05, Math.cos(a) * r * 0.82);
-          },
-          thickness: (_u, v) => 0.03 * (1 - 0.5 * Math.abs((v - 0.5) * 2)) + 0.008,
-          uvScale: 2,
-          smoothAngle: 42,
-        }),
-        {
-          slot: 'armor',
-          bind: { bones: [B.chest, B.spine, B.pelvis], falloff: 0.3, bias: 1.2 },
-          uvScale: 1,
-        },
-      );
-    }
-    spikeRow(b, rig, {
-      bone: B.chest,
-      count: 6,
-      from: [0, chest[1] + 0.16, -p.shoulderHalfWidth * 0.5],
-      to: [0, pelvis[1] + 0.1, -p.hipHalfWidth * 1.2],
-      length: 0.36,
-      baseW: 0.06,
-      slot: 'armor',
-      curve: -0.5,
-      tilt: -0.9,
-      bind: [B.chest],
+    // ── Body: one barrel swept along the pelvis→chest line, sections held
+    // perpendicular to it. Deep at the wing roots, where the flight muscle is.
+    const dy = chest[1] - pelvis[1];
+    const dz = chest[2] - pelvis[2];
+    const tilt = Math.atan2(dz, dy);
+    const spineRing = (t: number, w: number, d: number, round = 3.8): Ring => ({
+      y: pelvis[1] + dy * t,
+      z: pelvis[2] + dz * t,
+      w,
+      d,
+      round,
+      tiltX: tilt,
     });
+    b.add(
+      roughen(
+        loft(
+          [
+            spineRing(-0.62, 0.17, 0.19),
+            spineRing(-0.2, 0.3, 0.33),
+            spineRing(0.22, 0.29, 0.34),
+            spineRing(0.62, 0.35, 0.42),
+            spineRing(0.98, 0.4, 0.44),
+            spineRing(1.22, 0.29, 0.32),
+            spineRing(1.36, 0.17, 0.19),
+          ],
+          { segments: 14, smoothAngle: 48 },
+        ),
+        0.016,
+        5,
+        9,
+      ),
+      {
+        slot: 'flesh',
+        bind: { bones: [B.chest, B.spine, B.pelvis], falloff: 0.45, bias: 1.1 },
+        uvScale: 1.8,
+      },
+    );
+    // Scaled back plates over the top of the barrel, belly bands underneath.
+    for (let i = 0; i < 4; i++) {
+      const t = 0.1 + i * 0.32;
+      b.add(plate({ width: 0.5 - i * 0.04, height: 0.26, thickness: 0.032, bow: 0.34, topScale: 0.9, bottomScale: 1 }), {
+        slot: 'armor',
+        at: [0, pelvis[1] + dy * t + 0.24, pelvis[2] + dz * t - 0.12],
+        rot: [1.3, 0, 0],
+        bind: { bones: [B.chest, B.spine, B.pelvis], falloff: 0.3, bias: 1.2 },
+        uvScale: 1.4,
+      });
+    }
 
-    // ── Skull with a radiating horn crown.
+    // ── Neck: thick at the shoulders, dipping forward and DOWN. A dragon that
+    // carries its head level with its own back has no neck at all from a
+    // camera 35 degrees above it — the skull just merges into the chest.
     b.add(
       loft(
         [
-          { y: -p.headSize * 0.8, w: p.headSize * 0.6, d: p.headSize * 0.78, z: p.headSize * 0.24, round: 3 },
-          { y: -p.headSize * 0.24, w: p.headSize * 0.94, d: p.headSize * 1.08, z: p.headSize * 0.1, round: 3.2 },
-          { y: p.headSize * 0.36, w: p.headSize * 1.02, d: p.headSize * 1.06, round: 3.4 },
-          { y: p.headSize * 0.86, w: p.headSize * 0.56, d: p.headSize * 0.6, z: -p.headSize * 0.1, round: 3 },
+          // First ring starts INSIDE the barrel, so the join is a seam and not
+          // the hole that two nearly-touching capped lofts leave.
+          { y: chest[1] - 0.1, z: chest[2] - 0.14, w: 0.35, d: 0.37, round: 3.6, tiltX: 0.5 },
+          { y: chest[1] - 0.08, z: chest[2] + 0.22, w: 0.25, d: 0.27, round: 3.4, tiltX: 1.2 },
+          { y: chest[1] - 0.2, z: chest[2] + 0.58, w: 0.22, d: 0.23, round: 3.4, tiltX: 1.75 },
         ],
         { segments: 12, smoothAngle: 50 },
       ),
       {
-        slot: 'armor',
+        slot: 'flesh',
+        bind: { bones: [B.neck, B.chest, B.head], falloff: 0.3, bias: 1.2 },
+        uvScale: 1.4,
+      },
+    );
+
+    // ── Skull: built pointing along +Y and laid forward. Long muzzle, heavy
+    // brow, and two horns that sweep back past the neck.
+    // Nose down 12 degrees, not level: a muzzle pointing straight away from a
+    // camera that is already above it foreshortens into a disc.
+    const skullRot: [number, number, number] = [Math.PI / 2 + 0.2, 0, 0];
+    // Pushed forward of the head bone AND dropped below the line of the back,
+    // so the skull is its own shape rather than a bump on the shoulders.
+    const skullAt: [number, number, number] = [0, -0.58, 0.62];
+    b.add(
+      loft(
+        [
+          // Wider than it is deep all the way along: a flat wedge seen from
+          // above beats a round tube seen from anywhere.
+          { y: -hs * 0.5, w: hs * 0.66, d: hs * 0.56, round: 3.6 },
+          { y: 0, w: hs * 0.98, d: hs * 0.7, round: 3.8 },
+          { y: hs * 0.5, w: hs * 0.82, d: hs * 0.56, round: 3.6 },
+          { y: hs * 1.25, w: hs * 0.52, d: hs * 0.42, round: 3.4 },
+          { y: hs * 1.85, w: hs * 0.36, d: hs * 0.3, round: 3.2 },
+          { y: hs * 2.1, w: hs * 0.28, d: hs * 0.24, round: 3 },
+        ],
+        { segments: 12, smoothAngle: 50 },
+      ),
+      {
+        slot: 'flesh',
         bone: B.head,
-        at: [0, p.headSize * 0.3, 0],
+        at: skullAt,
+        rot: skullRot,
+        bind: { bones: [B.head], rigid: true },
+        uvScale: 1.3,
+      },
+    );
+    b.add(
+      loft(
+        [
+          { y: 0, w: hs * 0.5, d: hs * 0.24, round: 3.4 },
+          { y: hs * 1.0, w: hs * 0.36, d: hs * 0.2, round: 3.2 },
+          { y: hs * 1.95, w: hs * 0.22, d: hs * 0.14, round: 3 },
+        ],
+        { segments: 10, smoothAngle: 50 },
+      ),
+      {
+        slot: 'flesh',
+        bone: B.head,
+        at: [0, skullAt[1] - hs * 0.42, skullAt[2] + 0.02],
+        rot: [skullRot[0]! + 0.12, 0, 0],
         bind: { bones: [B.head], rigid: true },
         uvScale: 1.2,
       },
     );
-    for (let i = 0; i < 6; i++) {
-      const a = -1.15 + (i / 5) * 2.3;
-      b.add(spike({ length: p.headSize * (1.5 + Math.cos(a) * 0.7), baseW: p.headSize * 0.17, curve: -0.5, taper: 1.7, segments: 6 }), {
-        slot: 'armor',
+    // Horns: the second-widest thing on the head after the jaw.
+    b.add(spike({ length: hs * 2.4, baseW: hs * 0.26, curve: -0.75, taper: 1.6, segments: 7 }), {
+      slot: 'metal',
+      bone: B.head,
+      at: [hs * 0.42, skullAt[1] + hs * 0.36, skullAt[2] + hs * 0.1],
+      // Nearly horizontal, swept out and back: from a camera 35 degrees above
+      // the head, a horn that stands up is a 3 px stub, and a horn that lies
+      // out along the shoulders is a 25 px line. Two of them frame the skull.
+      rot: [-1.35, 0, -0.8],
+      mirror: true,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 0.8,
+    });
+    b.add(spike({ length: hs * 1.1, baseW: hs * 0.16, curve: -0.5, taper: 1.7, segments: 5 }), {
+      slot: 'metal',
+      bone: B.head,
+      at: [hs * 0.5, skullAt[1] + hs * 0.1, skullAt[2] + hs * 0.55],
+      rot: [-0.3, 0, -1.0],
+      mirror: true,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 0.7,
+    });
+    // Teeth along the upper jaw.
+    for (let i = 0; i < 4; i++) {
+      b.add(spike({ length: hs * 0.24, baseW: hs * 0.06, curve: 0, taper: 1.8, segments: 5 }), {
+        slot: 'metal',
         bone: B.head,
-        at: [Math.sin(a) * p.headSize * 0.8, p.headSize * 0.75, -p.headSize * 0.15 + Math.cos(a) * p.headSize * 0.2],
-        rot: [-0.5, 0, -a * 0.8],
+        at: [hs * 0.34, skullAt[1] - hs * 0.28, skullAt[2] + hs * (0.55 + i * 0.42)],
+        rot: [Math.PI, 0, 0],
+        mirror: true,
         bind: { bones: [B.head], rigid: true },
-        uvScale: 0.8,
+        uvScale: 0.5,
       });
     }
     b.add(gem(0.05, 0), {
       slot: 'glow',
       bone: B.head,
-      at: [p.headSize * 0.4, p.headSize * 0.42, p.headSize * 0.82],
+      at: [hs * 0.36, skullAt[1] + hs * 0.16, skullAt[2] + hs * 0.42],
       mirror: true,
       bind: { bones: [B.head], rigid: true },
       uvScale: 1,
     });
+    // Throat glow: the fire is visible before it is breathed.
+    b.add(gem(0.055, 0), {
+      slot: 'glow',
+      bind: { bones: [B.neck, B.chest], falloff: 0.2, bias: 1.4 },
+      at: [0, chest[1] + 0.04, chest[2] + 0.26],
+      uvScale: 1,
+    });
 
-    // ── Asymmetry: the left arm is a fused bone maul, the right stays lean.
+    // ── WINGS. Bound rigidly to the shoulders, spanning 1.55 m each side, so
+    // the figure is 4 m across before the gameplay scale multiplies it.
+    b.add(
+      wing({
+        span: 1.8,
+        rootChord: 1.06,
+        tipChord: 0.3,
+        sweep: 0.95,
+        fingers: 4,
+        scallop: 0.38,
+        droop: 0.24,
+        camber: 0.1,
+        thickness: 0.013,
+        strut: 0.055,
+        sag: 0.09,
+      }),
+      {
+        slot: 'cloth',
+        bone: 'shoulder.L',
+        at: [0.08, 0.3, -0.06],
+        rot: [0, 0.1, 0.16],
+        mirror: true,
+        bind: { bones: ['shoulder.L'], rigid: true },
+        uvScale: 1,
+      },
+    );
+    // Leading-edge spar and the wrist claw at its elbow, so the wing has a
+    // hard lit edge along the top instead of a soft membrane rim.
+    // The loft grows along +Y, so the Z rotation that lays it along the span
+    // has to be NEGATIVE: +PI/2 would send the spar out of the far side of the
+    // body, away from its own membrane.
     b.add(
       loft(
         [
-          { y: -0.62, w: 0.3, d: 0.32, round: 4.6 },
-          { y: -0.34, w: 0.38, d: 0.4, round: 5 },
-          { y: -0.06, w: 0.32, d: 0.34, round: 4.6 },
-          { y: 0.12, w: 0.2, d: 0.22, round: 4 },
+          { y: 0, w: 0.075, d: 0.095, round: 4 },
+          { y: 0.62, x: 0, z: -0.26, w: 0.05, d: 0.062, round: 4 },
+          { y: 1.2, x: 0, z: -0.58, w: 0.032, d: 0.04, round: 3.6 },
+          { y: 1.74, x: 0, z: -0.86, w: 0.016, d: 0.02, round: 3.4 },
         ],
-        { segments: 12, smoothAngle: 42 },
+        { segments: 8, smoothAngle: 50 },
       ),
       {
         slot: 'armor',
-        bone: 'wrist.L',
-        at: [0, -0.2, 0.03],
-        bind: { bones: ['wrist.L', 'hand.L'], rigid: true },
-        uvScale: 1.6,
+        bone: 'shoulder.L',
+        at: [0.08, 0.3, 0.32],
+        rot: [0, 0.1, -Math.PI / 2 - 0.16],
+        mirror: true,
+        bind: { bones: ['shoulder.L'], rigid: true },
+        uvScale: 1.4,
       },
     );
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2;
-      b.add(spike({ length: 0.3, baseW: 0.07, curve: 0.1, taper: 1.7, segments: 5 }), {
+    b.add(spike({ length: 0.34, baseW: 0.05, curve: 0.4, taper: 1.7, segments: 5 }), {
+      slot: 'metal',
+      bone: 'shoulder.L',
+      at: [0.72, 0.42, 0.06],
+      rot: [0.2, 0, -1.1],
+      mirror: true,
+      bind: { bones: ['shoulder.L'], rigid: true },
+      uvScale: 0.7,
+    });
+
+    // ── Tail: six segments, ending in a blade. It balances the neck so the
+    // creature reads as suspended rather than as standing on nothing.
+    const segs = p.tailSegments;
+    for (let i = 0; i < segs; i++) {
+      const t = i / segs;
+      const len = boneDistance(rig, `tail${i}`, i + 1 < segs ? `tail${i + 1}` : `tail${i}`) || 0.18;
+      b.add(
+        limbGeo({
+          len: Math.max(0.1, len) * 1.12,
+          topW: 0.155 * (1 - t * 0.72),
+          topD: 0.175 * (1 - t * 0.72),
+          botW: 0.145 * (1 - (t + 0.18) * 0.76),
+          botD: 0.16 * (1 - (t + 0.18) * 0.76),
+          round: 3.6,
+          segments: 9,
+        }),
+        {
+          slot: 'flesh',
+          bone: `tail${i}`,
+          // See the wolf: `limbGeo` grows along -Y, so this angle is positive.
+          rot: [Math.PI / 2, 0, 0],
+          bind: { bones: [`tail${i}`, i + 1 < segs ? `tail${i + 1}` : `tail${i}`], falloff: 0.16, bias: 1.4 },
+          uvScale: 1.2,
+        },
+      );
+      if (i % 2 === 0) {
+        b.add(spike({ length: 0.2 * (1 - t * 0.5), baseW: 0.045, curve: -0.4, taper: 1.8, segments: 5 }), {
+          slot: 'metal',
+          bone: `tail${i}`,
+          at: [0, 0.06, -0.04],
+          rot: [-0.4, 0, 0],
+          bind: { bones: [`tail${i}`], rigid: true },
+          uvScale: 0.6,
+        });
+      }
+    }
+    b.add(blade({ length: 0.46, width: 0.3, thickness: 0.05, curve: 0.2, belly: 0.5, tip: 0.2, heel: 0.35 }), {
+      slot: 'metal',
+      bone: `tail${segs - 1}`,
+      at: [0, 0, -0.06],
+      rot: [-Math.PI / 2, 0, 0],
+      bind: { bones: [`tail${segs - 1}`], rigid: true },
+      uvScale: 1.2,
+    });
+
+    // ── Talons on the hanging feet: three claws each, curled forward.
+    for (let i = 0; i < 3; i++) {
+      b.add(spike({ length: 0.26, baseW: 0.045, curve: 0.55, taper: 1.7, segments: 5 }), {
         slot: 'metal',
-        bone: 'wrist.L',
-        at: [Math.sin(a) * 0.3, -0.5, 0.03 + Math.cos(a) * 0.3],
-        rot: [Math.cos(a) * 1.3, 0, -Math.sin(a) * 1.3],
-        bind: { bones: ['wrist.L'], rigid: true },
-        uvScale: 0.7,
+        bone: 'ankle.L',
+        at: [(i - 1) * 0.07, -rw(rig, 'ankle.L')[1] + p.hover + 0.04, p.footLength * 0.55],
+        rot: [Math.PI / 2 + 0.5, 0, (i - 1) * 0.3],
+        mirror: true,
+        bind: { bones: ['ankle.L'], rigid: true },
+        uvScale: 0.6,
       });
     }
-    pauldron(b, rig, 'L', { size: 0.4, slot: 'armor', lames: 3, tiltOut: 0.45, spike: 1.9, spikeSlot: 'metal' });
-    pauldron(b, rig, 'R', { size: 0.2, slot: 'armor', lames: 1, tiltOut: 0.3 });
-
-    // Ragged waist wrap.
-    clothPanel(b, rig, {
-      slot: 'cloth',
-      bones: [B.pelvis, B.spine],
-      topY: pelvis[1] + 0.1,
-      bottomY: pelvis[1] - 0.66,
-      topW: 0.52,
-      bottomW: 0.4,
-      z: p.hipHalfWidth * 1.05,
-      hemPoint: 0.42,
-      thickness: 0.016,
-    });
   },
 };
 

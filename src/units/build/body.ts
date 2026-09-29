@@ -12,7 +12,7 @@
  */
 
 import * as THREE from 'three';
-import { loft, prism, type Ring } from './shapes';
+import { loft, plate, prism, shell, type Ring } from './shapes';
 import type { CharacterBuilder, SlotName } from './character';
 import type { Rig } from '../rig/rig';
 import { B } from '../rig/rig';
@@ -90,6 +90,10 @@ export interface BodyOptions {
   depthRatio?: number;
   /** Adds a visible neck column. Brutes should not have one. */
   neck?: boolean;
+  /** Emits the torso mass. Off when a recipe needs a non-upright body. */
+  torso?: boolean;
+  /** Emits the arm segments and hands. Off for winged and armless plans. */
+  arms?: boolean;
   /** Skips legs and emits a conical robe from the pelvis instead. */
   robe?: {
     slot: SlotName;
@@ -101,6 +105,24 @@ export interface BodyOptions {
   digitigrade?: boolean;
   /** Emits the head sphere. Off when the recipe supplies its own skull. */
   head?: boolean;
+  /**
+   * Face relief. At play zoom a head is about 15 px across and no texture
+   * survives the mip chain at that size, so the three things that still read
+   * have to be geometry: a brow that catches the key light, a band under it
+   * held back in shadow, and a hair or hood mass in a DIFFERENT material slot
+   * from the skin, so the two take different tints and the head is never one
+   * flat colour. Without this a head is a smooth oval at any distance.
+   */
+  face?: {
+    /** Slot for the recessed eye band. Wants the recipe's darkest material. */
+    eyeSlot: SlotName;
+    /** Slot for the hair/hood mass. Omitted means no hair. */
+    hairSlot?: SlotName;
+    /** Hair length past the jaw, in head sizes. */
+    hair?: number;
+    /** Brow slot; defaults to the head's own slot. */
+    browSlot?: SlotName;
+  };
 }
 
 export function addBody(b: CharacterBuilder, rig: Rig, o: BodyOptions): void {
@@ -110,31 +132,77 @@ export function addBody(b: CharacterBuilder, rig: Rig, o: BodyOptions): void {
   const chestScale = o.chestScale ?? 1;
   const waistScale = o.waistScale ?? 1;
 
-  const pelvisY = rw(rig, B.pelvis)[1];
-  const chestY = rw(rig, B.chest)[1];
-  const neckY = rw(rig, B.neck)[1];
+  const pelvis = rw(rig, B.pelvis);
+  const spineP = rw(rig, B.spine);
+  const chest = rw(rig, B.chest);
+  const neckP = rw(rig, B.neck);
+  const pelvisY = pelvis[1];
+  const chestY = chest[1];
+  const neckY = neckP[1];
   const torsoLen = chestY - pelvisY;
+
+  /**
+   * Where the spine actually is at a given height. `stoop` translates the spine
+   * bones forward but the torso mass used to be emitted as a straight vertical
+   * column, so a hunched creature's mesh stayed upright and the bones deformed
+   * out of it. Following the bones means the hunch is in the silhouette, which
+   * is the whole point of the parameter.
+   */
+  const knots: [number, number][] = [
+    [pelvisY, pelvis[2]],
+    [spineP[1], spineP[2]],
+    [chestY, chest[2]],
+    [neckY, neckP[2]],
+  ];
+  const spineZ = (y: number): number => {
+    if (y <= knots[0]![0]) return knots[0]![1] + (y - knots[0]![0]) * slopeAt(knots, 0);
+    for (let i = 1; i < knots.length; i++) {
+      const a = knots[i - 1]!;
+      const c = knots[i]!;
+      if (y <= c[0]) {
+        const span = c[0] - a[0];
+        return span <= 1e-5 ? c[1] : a[1] + (c[1] - a[1]) * ((y - a[0]) / span);
+      }
+    }
+    const last = knots.length - 1;
+    return knots[last]![1] + (y - knots[last]![0]) * slopeAt(knots, last);
+  };
+  // Sections stay perpendicular to the spine, so a steep back does not shear.
+  const tiltAt = (y: number): number => {
+    const d = Math.max(1e-3, torsoLen * 0.12);
+    return Math.atan2(spineZ(y + d) - spineZ(y - d), 2 * d);
+  };
+  const ring = (y: number, w: number, d: number, r: number): Ring => ({
+    y,
+    z: spineZ(y),
+    w,
+    d,
+    round: r,
+    tiltX: tiltAt(y),
+  });
 
   // ── Torso: wide at the shoulders, pinched at the waist, flared at the hips.
   const shoulderW = p.shoulderHalfWidth * 1.02 * chestScale;
   const waistW = p.hipHalfWidth * 1.15 * waistScale;
   const hipW = p.hipHalfWidth * 1.5;
-  const torso = loft(
-    [
-      { y: pelvisY - torsoLen * 0.34, w: hipW * 0.86, d: hipW * depth * 1.05, round: round + 1 },
-      { y: pelvisY - torsoLen * 0.05, w: hipW, d: hipW * depth * 1.1, round: round + 1 },
-      { y: pelvisY + torsoLen * 0.26, w: waistW, d: waistW * depth * 1.25, round },
-      { y: pelvisY + torsoLen * 0.62, w: shoulderW * 0.82, d: shoulderW * depth * 0.95, round },
-      { y: chestY + torsoLen * 0.06, w: shoulderW, d: shoulderW * depth, round },
-      { y: neckY + (p.neckLength ?? 0.05) * 0.2, w: shoulderW * 0.66, d: shoulderW * depth * 0.8, round },
-    ],
-    { segments: 14, smoothAngle: 52 },
-  );
-  b.add(torso, {
-    slot: o.torsoSlot,
-    bind: { bones: [B.chest, B.spine, B.pelvis], falloff: p.height * 0.13, bias: 1.15 },
-    uvScale: 1.6,
-  });
+  if (o.torso !== false) {
+    const torso = loft(
+      [
+        ring(pelvisY - torsoLen * 0.34, hipW * 0.86, hipW * depth * 1.05, round + 1),
+        ring(pelvisY - torsoLen * 0.05, hipW, hipW * depth * 1.1, round + 1),
+        ring(pelvisY + torsoLen * 0.26, waistW, waistW * depth * 1.25, round),
+        ring(pelvisY + torsoLen * 0.62, shoulderW * 0.82, shoulderW * depth * 0.95, round),
+        ring(chestY + torsoLen * 0.06, shoulderW, shoulderW * depth, round),
+        ring(neckY + (p.neckLength ?? 0.05) * 0.2, shoulderW * 0.66, shoulderW * depth * 0.8, round),
+      ],
+      { segments: 14, smoothAngle: 52 },
+    );
+    b.add(torso, {
+      slot: o.torsoSlot,
+      bind: { bones: [B.chest, B.spine, B.pelvis], falloff: p.height * 0.13, bias: 1.15 },
+      uvScale: 1.6,
+    });
+  }
 
   if (o.neck !== false) {
     const neckLen = Math.max(0.03, neckY - (chestY + torsoLen * 0.02));
@@ -180,9 +248,22 @@ export function addBody(b: CharacterBuilder, rig: Rig, o: BodyOptions): void {
         uvScale: 1.1,
       },
     );
+    if (o.face) addFace(b, o, hs, p.headSize * 0.35);
   }
 
   // ── Arms.
+  if (o.arms !== false) addArms(b, rig, o, round);
+
+  // ── Legs, or a robe in their place.
+  if (o.robe) {
+    addRobe(b, rig, o.robe);
+  } else if (rig.index[B.hipL] !== undefined) {
+    addLegs(b, rig, o, round);
+  }
+}
+
+function addArms(b: CharacterBuilder, rig: Rig, o: BodyOptions, round: number): void {
+  const p = rig.proportions;
   const upperLen = boneDistance(rig, `shoulder.L`, `elbow.L`);
   const foreLen = boneDistance(rig, `elbow.L`, `wrist.L`);
   const armW = p.height * 0.055 * (o.armScale ?? 1);
@@ -246,11 +327,11 @@ export function addBody(b: CharacterBuilder, rig: Rig, o: BodyOptions): void {
       uvScale: 0.7,
     },
   );
+}
 
-  // ── Legs, or a robe in their place.
-  if (o.robe) {
-    addRobe(b, rig, o.robe);
-  } else if (rig.index[B.hipL] !== undefined) {
+function addLegs(b: CharacterBuilder, rig: Rig, o: BodyOptions, round: number): void {
+  const p = rig.proportions;
+  {
     const thighLen = boneDistance(rig, 'hip.L', 'knee.L');
     const shinLen = boneDistance(rig, 'knee.L', 'ankle.L');
     const legW = p.height * 0.068 * (o.legScale ?? 1);
@@ -296,9 +377,14 @@ export function addBody(b: CharacterBuilder, rig: Rig, o: BodyOptions): void {
 
     // Boots: the widest, heaviest thing on the character below the waist.
     // Built in ankle-local space, so y = 0 is the ankle and y = -drop the sole.
+    //
+    // The sole lands on the character's own standing plane, which is `hover`
+    // above the ground, not on the ground itself. Without that term a flyer's
+    // feet are stretched the whole way down and read as stilts rather than as
+    // talons hanging in the air.
     const bs = p.height * 0.062 * (o.bootScale ?? 1);
     const footLen = p.footLength;
-    const drop = rw(rig, 'ankle.L')[1];
+    const drop = rw(rig, 'ankle.L')[1] - p.hover;
     const sole = -drop;
     b.add(
       loft(
@@ -320,6 +406,99 @@ export function addBody(b: CharacterBuilder, rig: Rig, o: BodyOptions): void {
       },
     );
   }
+}
+
+/**
+ * Brow, eye band and hair. `hs` is the head's half-size and `base` the skull's
+ * offset above the head bone, so everything here is placed in the same frame
+ * the skull was built in.
+ *
+ * The brow stands proud of the face and the eye band sits back behind it: the
+ * step between them is what turns a lit forehead and a shadowed eye socket into
+ * two different values under a single key light, which is the whole read at
+ * 15 px. The band is also a different material from the skin, so it survives
+ * even when the light is flat.
+ */
+function addFace(b: CharacterBuilder, o: BodyOptions, hs: number, base: number): void {
+  const f = o.face;
+  if (!f) return;
+  const skin = o.headSlot ?? o.limbSlot;
+
+  b.add(
+    plate({
+      width: hs * 1.12,
+      height: hs * 0.26,
+      thickness: hs * 0.1,
+      bow: 0.3,
+      droop: 0.1,
+      topScale: 1,
+      bottomScale: 0.88,
+    }),
+    {
+      slot: f.browSlot ?? skin,
+      bone: B.head,
+      at: [0, base + hs * 0.34, hs * 0.66],
+      rot: [0.4, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1.1,
+    },
+  );
+
+  b.add(
+    plate({
+      width: hs * 1.04,
+      height: hs * 0.34,
+      thickness: hs * 0.05,
+      bow: 0.26,
+      topScale: 1,
+      bottomScale: 0.8,
+    }),
+    {
+      slot: f.eyeSlot,
+      bone: B.head,
+      at: [0, base - hs * 0.02, hs * 0.66],
+      rot: [0.12, 0, 0],
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1.2,
+    },
+  );
+
+  if (!f.hairSlot) return;
+  const hair = f.hair ?? 0.4;
+  b.add(
+    shell({
+      nu: 10,
+      nv: 5,
+      // A back arc, open across the front 100 degrees, so the face stays clear
+      // while the outline of the skull stops being an egg.
+      surface: (u, v, out) => {
+        const a = Math.PI * (0.28 + u * 1.44);
+        // Height above the skull's centre, in head sizes. The radius has to
+        // close in at the crown — a constant radius leaves a disc floating off
+        // the top of the head, which is the part a top-down camera sees most.
+        const yy = 1.06 - v * (1.5 + hair);
+        const r = hs * (1.12 - 0.5 * Math.pow(Math.max(0, yy), 2.2));
+        out.set(Math.sin(a) * r, base + hs * yy, Math.cos(a) * r * 1.04 - hs * 0.06);
+      },
+      thickness: () => hs * 0.075,
+      uvScale: 1.6,
+      smoothAngle: 44,
+    }),
+    {
+      slot: f.hairSlot,
+      bone: B.head,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1,
+    },
+  );
+}
+
+/** Slope of the spine knot list at index `i`, used to extrapolate past the ends. */
+function slopeAt(knots: [number, number][], i: number): number {
+  const a = knots[Math.max(0, i - 1)]!;
+  const c = knots[Math.min(knots.length - 1, i + 1)]!;
+  const span = c[0] - a[0];
+  return Math.abs(span) < 1e-5 ? 0 : (c[1] - a[1]) / span;
 }
 
 /** Conical robe replacing the legs; the hem is the whole lower silhouette. */
