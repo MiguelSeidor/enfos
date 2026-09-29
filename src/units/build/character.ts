@@ -17,6 +17,7 @@ import { materials, type MaterialId } from '@/art/materials';
 import { CHARACTER_SHADING } from '@/render/lighting';
 import type { Bind, Rig } from '../rig/rig';
 import { computeSkinWeights } from '../rig/rig';
+import { getPart } from './parts';
 
 export type SlotName = 'armor' | 'cloth' | 'leather' | 'metal' | 'flesh' | 'glow';
 
@@ -92,6 +93,26 @@ export class CharacterBuilder {
     if (opts.mirror) this.addOnce(geo, opts, true);
     geo.dispose();
     return this;
+  }
+
+  /**
+   * Adds an imported rigid part, when one is loaded under `partId`.
+   *
+   * Returns false when the part is absent, which is the normal state for any
+   * creature whose asset has not been authored yet. The recipe then keeps the
+   * procedural part it already built, and that fallback is the whole point: it
+   * lets heads and weapons land one creature at a time rather than requiring a
+   * complete set before anything can ship.
+   *
+   * The geometry is cloned because `add` consumes and disposes what it is
+   * given, while `parts.ts` hands out one cached instance shared by every
+   * character using that id.
+   */
+  addImported(partId: string, opts: PartOptions): boolean {
+    const geo = getPart(partId);
+    if (!geo) return false;
+    this.add(geo.clone(), opts);
+    return true;
   }
 
   private addOnce(geo: THREE.BufferGeometry, opts: PartOptions, mirrored: boolean): void {

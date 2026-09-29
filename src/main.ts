@@ -47,6 +47,7 @@ import { playback } from '@/core/playback';
 import { createVfxModules } from '@/vfx';
 import { AudioModule } from '@/audio/audio';
 import { prepareImportedCharacters } from '@/units/build/importedCharacter';
+import { preloadParts } from '@/units/build/parts';
 import { HeroSelect, type HeroCard, type CommandSlot } from '@/ui';
 import { LevelPanel } from '@/ui/levelPanel';
 import { T1_STOCK, SABOTAGE_ITEMS } from '@/economy/items';
@@ -305,6 +306,12 @@ async function main(): Promise<void> {
     localTeam: () => gameplay?.match.localTeam ?? 0,
   });
   engine.add(audio);
+
+  // Before initAll, not after: module init builds characters (the showcase does
+  // it immediately), character building is synchronous, and a rigid part that
+  // arrives late is simply absent from a mesh that has already been assembled
+  // and, for creeps, baked into a VAT texture.
+  await preloadParts();
 
   await engine.initAll(setBootProgress);
 
