@@ -66,6 +66,7 @@ export interface PartEntry {
  */
 export const PART_MANIFEST: Record<string, PartEntry> = {
   'creep.cleaver.head': { url: '/models/parts/orc-head.glb' },
+  'creep.cleaver.torso': { url: '/models/parts/orc-torso.glb' },
 };
 
 const loader = new GLTFLoader();

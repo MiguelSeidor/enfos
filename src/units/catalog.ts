@@ -1366,7 +1366,11 @@ const cleaver: CharacterDef = {
       round: 3.6,
       chestScale: 1.2,
       waistScale: 0.84,
-      armScale: 1.3,
+      // Thinner arms once the torso is authored. The 1.3 was carrying the
+      // shoulder bulk that made this thing read as a brute, and an authored
+      // torso already has that mass sculpted into it. Leaving both made the
+      // silhouette two rectangular slabs with a small body between them.
+      armScale: hasPart('creep.cleaver.torso') ? 0.95 : 1.3,
       legScale: 1.2,
       handScale: 1.7,
       bootScale: 1.3,
@@ -1385,10 +1389,17 @@ const cleaver: CharacterDef = {
     // is modelled with the hunch already in it: the shoulder slab piled behind
     // the neck is the whole point of the silhouette and is not something to
     // bolt on afterwards.
+    // Numbers, not guesses. The part is centred on its own bounding box and is
+    // 1.0 wide across the arm stubs; shoulder half width here is 0.4, so 0.85
+    // lands the shoulders where the rig puts them. The vertical centre sits
+    // between chest (1.435) and pelvis (0.82) rather than on the chest bone,
+    // because an authored orc torso includes the gut: at this scale the top
+    // reaches 1.59, which is the head bone, and the belt lands just above the
+    // pelvis.
     const importedTorso = b.addImported('creep.cleaver.torso', {
       slot: 'flesh',
-      at: [0, chest[1] + 0.02, chest[2] - 0.04],
-      scale: 1.35,
+      at: [0, 1.24, chest[2] - 0.03],
+      scale: 0.85,
       bind: { bones: [B.chest], rigid: true },
       uvScale: 1.4,
     });
@@ -1538,7 +1549,14 @@ const cleaver: CharacterDef = {
     });
 
     // Asymmetry is the second read: one plated shoulder, one bare arm.
-    pauldron(b, rig, 'R', { size: 0.33, slot: 'armor', lames: 2, tiltOut: 0.55, spike: 1.9, spikeSlot: 'metal' });
+    //
+    // Skipped when the torso is authored, because a generated orc torso already
+    // carries its pauldron, modelled in with the shoulder mass. Leaving both in
+    // put a flat quad the size of half the body over a sculpted one, and the
+    // quad won.
+    if (!importedTorso) {
+      pauldron(b, rig, 'R', { size: 0.33, slot: 'armor', lames: 2, tiltOut: 0.55, spike: 1.9, spikeSlot: 'metal' });
+    }
     b.add(prism({ h: 0.19, w0: 0.1, d0: 0.11, w1: 0.082, d1: 0.092, round: 5, segments: 8 }), {
       slot: 'leather',
       bone: 'elbow.L',
@@ -1547,14 +1565,18 @@ const cleaver: CharacterDef = {
       uvScale: 1.2,
     });
 
-    // Chest strapping and a hanging loincloth.
-    b.add(plate({ width: 0.42, height: 0.12, thickness: 0.022, bow: 0.3, topScale: 0.9, bottomScale: 0.9 }), {
-      slot: 'leather',
-      at: [0.02, chest[1] - 0.26, chest[2] + 0.04],
-      rot: [0, 0, 0.42],
-      bind: { bones: [B.chest, B.spine], falloff: 0.2, bias: 1.4 },
-      uvScale: 1.2,
-    });
+    // Chest strapping and a hanging loincloth. The strap goes the same way as
+    // the pauldron: an authored torso has its own crossed straps and belt, and
+    // a second band laid over them only reads as a seam.
+    if (!importedTorso) {
+      b.add(plate({ width: 0.42, height: 0.12, thickness: 0.022, bow: 0.3, topScale: 0.9, bottomScale: 0.9 }), {
+        slot: 'leather',
+        at: [0.02, chest[1] - 0.26, chest[2] + 0.04],
+        rot: [0, 0, 0.42],
+        bind: { bones: [B.chest, B.spine], falloff: 0.2, bias: 1.4 },
+        uvScale: 1.2,
+      });
+    }
     clothPanel(b, rig, {
       slot: 'cloth',
       bones: [B.pelvis],
