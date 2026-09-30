@@ -64,7 +64,9 @@ export interface PartEntry {
  * not here, the recipe keeps its procedural part, and nothing else notices. It
  * is what lets heads arrive one creature at a time instead of in a big bang.
  */
-export const PART_MANIFEST: Record<string, PartEntry> = {};
+export const PART_MANIFEST: Record<string, PartEntry> = {
+  'creep.cleaver.head': { url: '/models/parts/orc-head.glb' },
+};
 
 const loader = new GLTFLoader();
 const geometries = new Map<string, THREE.BufferGeometry>();

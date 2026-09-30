@@ -1397,6 +1397,32 @@ const cleaver: CharacterDef = {
     // placed at the bone's origin would be buried inside it.
     const skullY = hs * 0.16;
     const skullZ = hs * 0.3;
+    // An authored head, when one exists, replaces the entire procedural skull
+    // group below -- skull, brow, jaw, tusks, fangs, top-knot -- because it
+    // already carries every one of them and two sets would interpenetrate. The
+    // eye glow is kept either way: it is a `glow` slot the mesh has no
+    // equivalent for, and it is what makes a head read as alive at 15 px.
+    //
+    // No yaw correction. The "-Z forward" convention in `assets/models.ts`
+    // governs whole imported characters; a part is placed in BONE space, and
+    // every procedural part here is authored with +Z as the face direction,
+    // which is also how the generator reconstructs a head facing its camera.
+    // Turning it half a round, as the whole-character rule would suggest, puts
+    // the face out the back of the skull.
+    // Placed by its own centre, because the prepare tool centres a part on its
+    // bounding box, and pushed forward rather than sat on top of the neck: this
+    // orc's whole silhouette idea is a skull carried out in front of a hunched
+    // shoulder line, and a head parked above the hunch reads as a small lump on
+    // a big green slab.
+    const importedHead = b.addImported('creep.cleaver.head', {
+      slot: 'flesh',
+      bone: B.head,
+      at: [0, skullY - hs * 0.1, skullZ + hs * 0.55],
+      scale: hs * 2.5,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1,
+    });
+    if (!importedHead) {
     b.add(
       loft(
         [
@@ -1458,14 +1484,6 @@ const cleaver: CharacterDef = {
       bind: { bones: [B.head], rigid: true },
       uvScale: 0.6,
     });
-    b.add(gem(0.024, 0), {
-      slot: 'glow',
-      bone: B.head,
-      at: [hs * 0.32, skullY + hs * 0.04, skullZ + hs * 0.96],
-      mirror: true,
-      bind: { bones: [B.head], rigid: true },
-      uvScale: 1,
-    });
     // Braided top-knot: a second vertical accent on an otherwise round skull.
     b.add(spike({ length: hs * 1.2, baseW: hs * 0.17, curve: -0.6, taper: 1.4, segments: 6 }), {
       slot: 'leather',
@@ -1474,6 +1492,21 @@ const cleaver: CharacterDef = {
       rot: [-0.35, 0, 0],
       bind: { bones: [B.head], rigid: true },
       uvScale: 0.7,
+    });
+    }
+
+    // Outside the branch on purpose: an authored head brings its own sockets
+    // but nothing that emits, and at 15 px a lit eye is most of what says the
+    // thing is alive rather than a rock.
+    b.add(gem(0.024, 0), {
+      slot: 'glow',
+      bone: B.head,
+      at: importedHead
+        ? [hs * 0.34, skullY + hs * 0.14, skullZ + hs * 1.5]
+        : [hs * 0.32, skullY + hs * 0.04, skullZ + hs * 0.96],
+      mirror: true,
+      bind: { bones: [B.head], rigid: true },
+      uvScale: 1,
     });
 
     // Asymmetry is the second read: one plated shoulder, one bare arm.
