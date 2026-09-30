@@ -320,6 +320,45 @@ Overlapping hard scales with chipped edges. Palette: dark oxblood red, black
 horns, dull bone teeth.
 ```
 
+### El patrón completo de un personaje
+
+Una cabeza sola no arregla un personaje. El orco quedó con una cabeza esculpida
+sobre un cuerpo de cajas, y el contraste lo empeoraba. El reparto que funciona:
+
+| Pieza | Hueso | Por qué puede ser rígida |
+| --- | --- | --- |
+| Cabeza | `head` | No hay animación facial |
+| Torso (con la joroba dentro) | `chest` | Lo que se deforma en este rig son las articulaciones, no las masas entre ellas. La columna flexa un poco y a 79 px eso no se ve |
+| Arma | `hand.R` | Una hoja no se dobla |
+
+**Los miembros se quedan procedurales a propósito.** A esta distancia un brazo
+es una columna de seis píxeles: importa su silueta, no su superficie. Gastar
+generaciones ahí no se ve.
+
+Cada pieza tiene reserva: si el asset no existe, la receta construye la suya y
+el juego sigue. Se pueden ir añadiendo de una en una.
+
+**Trucos aprendidos generando la cabeza**, aplican a todas:
+
+- **PNG con alfa real**, nunca JPEG ni captura de pantalla con el damero pintado.
+- **Tres cuartos**, girado 30-40 grados. De frente Trellis no tiene profundidad
+  y aplana; de perfil pierde la simetría.
+- **Recorta pegado a la pieza.** Lo que sobre en la imagen sale como cáscara
+  hueca en la malla.
+- Lo que no se ve en la imagen se lo inventa, y lo inventa liso.
+
+### `torso_orc.png`
+```
+[PREÁMBULO DE ARTE]
+Torso only, 3/4 view. No head, no forearms: the neck ends in a stump and the
+arms are cut at the shoulder. A hulking orc's upper body: a heavy slab of
+shoulder muscle piled BEHIND the neck so the back is humped, a barrel chest,
+a thick gut, leather straps crossing the chest and a wide studded belt. One
+shoulder carries a crude iron pauldron of riveted plates, the other is bare
+green skin with old scars. Palette: desaturated olive green skin, dark brown
+leather, pitted dark iron.
+```
+
 ### Armas (mismo camino, mismo presupuesto)
 
 ```

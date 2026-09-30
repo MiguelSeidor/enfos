@@ -37,6 +37,7 @@ import type { VisualDescriptor } from '@/core/contracts';
 import type { MaterialId } from '@/art/materials';
 import { CharacterBuilder, type Palette, type SlotConfig, type SlotName } from './build/character';
 import { addBody, boneDistance, limbGeo, rw } from './build/body';
+import { hasPart } from './build/parts';
 import {
   blade,
   gem,
@@ -1352,6 +1353,16 @@ const cleaver: CharacterDef = {
       limbSlot: 'flesh',
       handSlot: 'flesh',
       bootSlot: 'leather',
+      // An authored torso, when one exists, takes over both the chest mass
+      // emitted here and the hunch added below, so neither is built.
+      //
+      // A torso can be a rigid part for the same reason a head can: what
+      // deforms in this rig is the joints, not the masses between them.
+      // Binding the chest rigid costs a little spine flex, and at 79 px that
+      // is nothing against what a sculpted mass buys. Limbs stay procedural on
+      // purpose: at this size an arm is a six pixel column whose silhouette
+      // matters and whose surface does not.
+      torso: !hasPart('creep.cleaver.torso'),
       round: 3.6,
       chestScale: 1.2,
       waistScale: 0.84,
@@ -1367,6 +1378,22 @@ const cleaver: CharacterDef = {
     const chest = rw(rig, B.chest);
     const pelvis = rw(rig, B.pelvis);
 
+    // ── The torso. An authored mass if one exists, otherwise the procedural
+    // hunch below.
+    //
+    // Placed at the chest bone and pushed back, because an authored orc torso
+    // is modelled with the hunch already in it: the shoulder slab piled behind
+    // the neck is the whole point of the silhouette and is not something to
+    // bolt on afterwards.
+    const importedTorso = b.addImported('creep.cleaver.torso', {
+      slot: 'flesh',
+      at: [0, chest[1] + 0.02, chest[2] - 0.04],
+      scale: 1.35,
+      bind: { bones: [B.chest], rigid: true },
+      uvScale: 1.4,
+    });
+
+    if (!importedTorso) {
     // ── The hunch, as mass rather than as a lean: a slab of shoulder piled
     // behind the neck. It is what pushes the skull out in front of the chest.
     b.add(
@@ -1390,6 +1417,7 @@ const cleaver: CharacterDef = {
         uvScale: 1.6,
       },
     );
+    }
 
     // ── Skull: low forehead, no neck, jaw pushed forward under a heavy brow.
     // Every feature below is placed relative to the skull's own offset, not to
@@ -1539,6 +1567,22 @@ const cleaver: CharacterDef = {
     });
 
     // ── Cleaver: a slab as wide as his chest, held low in the right hand.
+    //
+    // An authored weapon replaces haft, blade and spine together: a generated
+    // cleaver arrives as one mesh, and three procedural pieces inside it would
+    // only poke through. `rot` matches the procedural grip so the swing reads
+    // the same either way.
+    const importedWeapon = b.addImported('creep.cleaver.weapon', {
+      slot: 'metal',
+      bone: 'hand.R',
+      at: [0.02, 0.1, 0.04],
+      rot: [0.3, 0, 0.12],
+      scale: 1,
+      bind: { bones: ['hand.R'], rigid: true },
+      uvScale: 1.2,
+    });
+
+    if (!importedWeapon) {
     b.add(prism({ h: 0.4, w0: 0.042, d0: 0.042, w1: 0.036, d1: 0.036, round: 6, segments: 6 }), {
       slot: 'leather',
       bone: 'hand.R',
@@ -1564,6 +1608,7 @@ const cleaver: CharacterDef = {
       bind: { bones: ['hand.R'], rigid: true },
       uvScale: 0.8,
     });
+    }
   },
 };
 
