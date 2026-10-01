@@ -539,12 +539,96 @@ const inPage = async (clipSources) => {
   mesh.geometry = outGeometry;
   root.updateMatrixWorld(true);
 
+  // ── 6b. Drop bones too small to read, and the branches that hang off them ──
+  // The rig is built for cinematics: 139 bones, with joints for every finger,
+  // each belt knife, each strand of rope and the fringe of the kilt. A creep is
+  // 79 pixels tall on screen and none of that survives the trip. The cost does:
+  // at 30 orcs the skeletons alone took 7.8 ms of a 16.6 ms frame.
+  //
+  // A bone is kept when it drives at least 20 of the 3,548 vertices, plus every
+  // ancestor of one that is. A dropped bone's vertices go to its nearest kept
+  // ancestor, which is where they would have followed anyway once the joint
+  // between them stopped existing. Nothing is left orphaned and no weight is
+  // lost: the weights that land on the same bone are summed and renormalised.
+  {
+    const KEEP_AT = 20;
+    const outSkinIndex = outGeometry.getAttribute('skinIndex');
+    const outSkinWeight = outGeometry.getAttribute('skinWeight');
+    const drives = new Array(bones.length).fill(0);
+    for (let v = 0; v < outSkinIndex.count; v++) {
+      for (let k = 0; k < 4; k++) {
+        if (outSkinWeight.getComponent(v, k) > 0.05) drives[outSkinIndex.getComponent(v, k)]++;
+      }
+    }
+    const boneSet = new Set(bones);
+    const keep = new Set();
+    for (let i = 0; i < bones.length; i++) {
+      if (drives[i] < KEEP_AT) continue;
+      for (let n = bones[i]; n && boneSet.has(n); n = n.parent) keep.add(n);
+    }
+    const kept = bones.filter((b) => keep.has(b));
+    const newSlot = new Map(kept.map((b, i) => [b, i]));
+    const redirect = new Int32Array(bones.length);
+    for (let i = 0; i < bones.length; i++) {
+      let n = bones[i];
+      while (n && !keep.has(n) && boneSet.has(n)) n = n.parent;
+      redirect[i] = n && newSlot.has(n) ? newSlot.get(n) : 0;
+    }
+
+    for (let v = 0; v < outSkinIndex.count; v++) {
+      const merged = new Map();
+      for (let k = 0; k < 4; k++) {
+        const w = outSkinWeight.getComponent(v, k);
+        if (w <= 0) continue;
+        const slot = redirect[outSkinIndex.getComponent(v, k)];
+        merged.set(slot, (merged.get(slot) ?? 0) + w);
+      }
+      const ranked = [...merged.entries()].sort((a, b2) => b2[1] - a[1]).slice(0, 4);
+      const sum = ranked.reduce((t, [, w]) => t + w, 0) || 1;
+      const idx = [0, 0, 0, 0];
+      const wts = [0, 0, 0, 0];
+      ranked.forEach(([slot, w], k) => { idx[k] = slot; wts[k] = w / sum; });
+      outSkinIndex.setXYZW(v, idx[0], idx[1], idx[2], idx[3]);
+      outSkinWeight.setXYZW(v, wts[0], wts[1], wts[2], wts[3]);
+    }
+    outSkinIndex.needsUpdate = true;
+    outSkinWeight.needsUpdate = true;
+
+    // A branch with no kept bone under it drives nothing and can leave the tree
+    // entirely, which takes its wrapper chain with it.
+    const holdsKept = (node) => {
+      if (keep.has(node)) return true;
+      for (const child of node.children) if (holdsKept(child)) return true;
+      return false;
+    };
+    const doomed = [];
+    root.traverse((node) => {
+      if (node === root || node.isMesh) return;
+      if (node.parent && !node.parent.isMesh && !holdsKept(node)) doomed.push(node);
+    });
+    for (const node of doomed) if (node.parent) node.removeFromParent();
+
+    for (const clip of clips) {
+      clip.tracks = clip.tracks.filter((t) => keep.has(boneByName.get(t.name.split('.')[0])));
+    }
+
+    root.updateMatrixWorld(true);
+    const reduced = new THREE.Skeleton(kept);
+    mesh.bind(reduced, new THREE.Matrix4());
+    let left = 0;
+    root.traverse(() => left++);
+    say('bones', `${bones.length} -> ${kept.length}, nodes now ${left}`);
+  }
+
   // ── 7. Did the axes survive all of that? ──────────────────────────────────
   const outSi = outGeometry.getAttribute('skinIndex');
   const outSw = outGeometry.getAttribute('skinWeight');
+  // Against the FINAL skeleton: the bone reduction renumbered every slot, and
+  // checking the old numbering is how a passing test can mean nothing.
+  const finalSlot = new Map(mesh.skeleton.bones.map((b, i) => [b.name, i]));
   const check = {};
   for (const bn of ['ork_right_axe_1', 'ork_left_axe_1']) {
-    const slot = slotOf.get(bn);
+    const slot = finalSlot.get(bn);
     if (slot === undefined) { check[bn] = 'MISSING'; continue; }
     let n = 0;
     for (let i = 0; i < outSi.count; i++) {
@@ -565,8 +649,6 @@ const inPage = async (clipSources) => {
   // is named by no animation track.
   {
     const protectedNodes = new Set(bones);
-    const animatedNames = new Set();
-    for (const clip of clips) for (const t of clip.tracks) animatedNames.add(t.name.split('.')[0]);
     let before = 0;
     root.traverse(() => before++);
     for (;;) {
@@ -579,7 +661,9 @@ const inPage = async (clipSources) => {
         // what protects a node, not its class.
         if (protectedNodes.has(node) || node.isMesh) continue;
         if (node.children.length !== 1) continue;
-        if (animatedNames.has(node.name)) continue;
+        // Not protected by name: every wrapper shares its name with the bone
+        // it fronts, so a name test protects exactly what should go. Tracks
+        // only ever target skeleton bones, which protectedNodes already covers.
         node.updateMatrix();
         const e = node.matrix.elements;
         let identity = true;
