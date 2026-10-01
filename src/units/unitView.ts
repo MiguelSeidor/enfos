@@ -27,6 +27,8 @@ import { buildCharacter, getCharacter, type CharacterDef } from './catalog';
 import { HeroView } from './render/heroView';
 import { CreepBatch, makeVatGeometry } from './render/creepBatch';
 import { bakeVat } from './anim/vat';
+import { bakeImportedVat } from './anim/vatImported';
+import { getAuthored } from './build/authoredCharacter';
 import { CLIP_IDS, type ClipId } from './anim/clips';
 import { runtimeOf } from '@/gameplay/units';
 
@@ -149,6 +151,25 @@ export class UnitViewModule implements GameModule {
   private batchFor(def: CharacterDef): CreepBatch {
     let batch = this.batches.get(def.id);
     if (batch) return batch;
+    // An authored character takes precedence over the procedural build: it
+    // brings its own skeleton, its own painted weights and its own clips, all
+    // of which are better than what this project generates. Only the bake
+    // differs, and it produces the same textures, so everything below is
+    // identical either way.
+    const authored = getAuthored(def.id);
+    if (authored) {
+      const bake = bakeImportedVat(authored);
+      batch = new CreepBatch(
+        def.id,
+        makeVatGeometry(authored.mesh.geometry),
+        authored.materials as THREE.MeshStandardMaterial[],
+        bake,
+        BATCH_CAPACITY,
+      );
+      this.batches.set(def.id, batch);
+      this.root.add(batch.mesh);
+      return batch;
+    }
     const built = buildCharacter(def);
     const bake = bakeVat(built.rig, def.profile, built.geometry);
     batch = new CreepBatch(def.id, makeVatGeometry(built.geometry), built.materials, bake, BATCH_CAPACITY);

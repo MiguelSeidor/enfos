@@ -48,6 +48,7 @@ import { createVfxModules } from '@/vfx';
 import { AudioModule } from '@/audio/audio';
 import { prepareImportedCharacters } from '@/units/build/importedCharacter';
 import { preloadParts } from '@/units/build/parts';
+import { preloadAuthored } from '@/units/build/authoredCharacter';
 import { HeroSelect, type HeroCard, type CommandSlot } from '@/ui';
 import { LevelPanel } from '@/ui/levelPanel';
 import { T1_STOCK, SABOTAGE_ITEMS } from '@/economy/items';
@@ -312,6 +313,7 @@ async function main(): Promise<void> {
   // arrives late is simply absent from a mesh that has already been assembled
   // and, for creeps, baked into a VAT texture.
   await preloadParts();
+  await preloadAuthored();
 
   await engine.initAll(setBootProgress);
 

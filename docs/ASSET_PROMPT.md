@@ -340,12 +340,23 @@ el juego sigue. Se pueden ir añadiendo de una en una.
 
 **Trucos aprendidos generando la cabeza**, aplican a todas:
 
-- **PNG con alfa real**, nunca JPEG ni captura de pantalla con el damero pintado.
+- **El formato da igual, y no se pide en el prompt.** Nano Banana entrega JPEG
+  digas lo que digas, porque el contenedor lo decide la herramienta y no el
+  modelo. Tampoco importa: TRELLIS quita el fondo por su cuenta, y la cabeza
+  del orco salió limpia partiendo de un JPEG con el damero de transparencia
+  pintado encima como píxeles. No pierdas tiempo persiguiendo un PNG con alfa.
 - **Tres cuartos**, girado 30-40 grados. De frente Trellis no tiene profundidad
   y aplana; de perfil pierde la simetría.
 - **Recorta pegado a la pieza.** Lo que sobre en la imagen sale como cáscara
   hueca en la malla.
 - Lo que no se ve en la imagen se lo inventa, y lo inventa liso.
+- **Una sola vista, nunca una hoja de rotación.** Pedir una pieza suelta invita
+  al modelo a devolver cuatro vistas en fila, que es lo correcto para una hoja
+  de referencia humana y lo peor posible para TRELLIS: reconstruye un objeto a
+  partir de una vista, y con cuatro las funde en una masa. Decirlo explícito en
+  el prompt («a single view, NOT a turnaround sheet, only one object in the
+  image»). Si ya ha salido así, se recorta una vista y se usa esa, aunque
+  entonces esa vista lleva solo un cuarto de la resolución del fichero.
 
 ### `torso_orc.png`
 ```
