@@ -187,13 +187,20 @@ export async function preloadAuthored(): Promise<void> {
         }
         if (clips.size === 0) throw new Error('no clips in the file');
 
-        const material = Array.isArray(skinned.material) ? skinned.material[0]! : skinned.material;
+        // A character can carry more than one material: this orc has one for
+        // the body and one for its axes, each with its own texture, drawn as
+        // two groups of the same mesh. Keeping only the first would leave the
+        // second group's triangles pointing at a material that is not there.
+        const materials = (
+          Array.isArray(skinned.material) ? skinned.material : [skinned.material]
+        ) as THREE.MeshStandardMaterial[];
         // Tone mapping happens in the composer, so an imported colour map has
-        // to be flagged sRGB or the whole character renders washed out.
-        const std = material as THREE.MeshStandardMaterial;
-        if (std.map) std.map.colorSpace = THREE.SRGBColorSpace;
+        // to be flagged sRGB or the character renders washed out.
+        for (const material of materials) {
+          if (material.map) material.map.colorSpace = THREE.SRGBColorSpace;
+        }
 
-        loaded.set(id, { root, mesh: skinned, clips, materials: [material] });
+        loaded.set(id, { root, mesh: skinned, clips, materials });
       } catch (err) {
         if (!warned.has(id)) {
           warned.add(id);
