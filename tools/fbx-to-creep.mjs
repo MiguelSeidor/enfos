@@ -32,9 +32,9 @@
  * skeleton keyed by bone NAME, and rewrite every submesh's indices through it.
  *
  * The rest is ordinary. Vertices are pre-transformed by each submesh's bind
- * matrix so the merged mesh binds at identity. The two materials are kept as
- * two draw groups rather than atlased, because the body and the axes ship
- * separate textures. Clips come from twelve animation files whose bone names
+ * matrix so the merged mesh binds at identity. The body and the axe textures
+ * are packed into one atlas so the character stays a single mesh with a single
+ * material. Clips come from twelve animation files whose bone names
  * match the base mesh, so they need no retargeting, only renaming to the ids
  * this project uses.
  *
@@ -200,20 +200,54 @@ const inPage = async (clipSources) => {
   };
   const bodyTex = await shrink('/_src/tex/ork.tga', 1024);
   const axeTex = await shrink('/_src/tex/axe.tga', 512);
-  say('textures', `body ${bodyTex.from.join('x')}->1024, axe ${axeTex.from.join('x')}->512`);
 
-  const materials = groups.map((g) =>
+  // One atlas, not two materials. Two materials mean two draw groups, and the
+  // exporter writes a draw group as its own glTF mesh with its own full copy of
+  // the vertex buffer: 3,553 vertices became 7,106, skinned twice per frame,
+  // for two draw calls per orc. Packing the body into the left half and the
+  // axes into the right collapses that back to one mesh, one material and one
+  // skinning pass, and the UVs just scale into their half.
+  const atlas = document.createElement('canvas');
+  atlas.width = 2048;
+  atlas.height = 1024;
+  const actx = atlas.getContext('2d');
+  const RECT = {
+    lambert1: { x: 0, y: 0, w: 1024, h: 1024 },
+    lambert2: { x: 1024, y: 0, w: 512, h: 512 },
+  };
+  actx.drawImage(bodyTex.texture.image, RECT.lambert1.x, RECT.lambert1.y, RECT.lambert1.w, RECT.lambert1.h);
+  actx.drawImage(axeTex.texture.image, RECT.lambert2.x, RECT.lambert2.y, RECT.lambert2.w, RECT.lambert2.h);
+  const atlasTexture = new THREE.CanvasTexture(atlas);
+  atlasTexture.colorSpace = THREE.SRGBColorSpace;
+  atlasTexture.flipY = false;
+  say('textures', `body ${bodyTex.from.join('x')}->1024 + axe ${axeTex.from.join('x')}->512, packed into one 2048x1024 atlas`);
+
+  let uvCursor = 0;
+  for (const [name, chunks] of byMaterial) {
+    const r = RECT[name] ?? RECT.lambert1;
+    for (const c of chunks) {
+      for (let i = 0; i < c.count; i++) {
+        const at = (uvCursor + i) * 2;
+        uvs[at] = (r.x + uvs[at] * r.w) / atlas.width;
+        uvs[at + 1] = (r.y + uvs[at + 1] * r.h) / atlas.height;
+      }
+      uvCursor += c.count;
+    }
+  }
+  geometry.getAttribute('uv').needsUpdate = true;
+
+  const materials = [
     new THREE.MeshStandardMaterial({
-      name: g.name,
-      map: (g.name === 'lambert2' ? axeTex : bodyTex).texture,
+      name: 'orc',
+      map: atlasTexture,
       roughness: 0.85,
       metalness: 0.0,
     }),
-  );
+  ];
 
   // ── 4. The skinned mesh ───────────────────────────────────────────────────
   const skeleton = new THREE.Skeleton(bones);
-  const mesh = new THREE.SkinnedMesh(geometry, materials);
+  const mesh = new THREE.SkinnedMesh(geometry, materials[0]);
   mesh.name = 'orc';
   // The bones live under the FBX root; keep that hierarchy and hang the mesh
   // beside it so the exporter writes a complete skin.
@@ -498,9 +532,8 @@ const inPage = async (clipSources) => {
   outGeometry.setAttribute('skinIndex', new THREE.BufferAttribute(pack(wSi, 4), 4));
   outGeometry.setAttribute('skinWeight', new THREE.BufferAttribute(pack(wSw, 4), 4));
   outGeometry.setIndex(finalIndex.map((v) => used[v]));
-  for (let gi = 0; gi < finalGroups.length; gi++) {
-    outGeometry.addGroup(finalGroups[gi].start, finalGroups[gi].count, gi);
-  }
+  // A single group, because the atlas gave the character a single material.
+  outGeometry.addGroup(0, finalIndex.length, 0);
   say('final', `${live} verts, ${finalIndex.length / 3} tris`);
 
   mesh.geometry = outGeometry;
@@ -523,7 +556,51 @@ const inPage = async (clipSources) => {
   }
   report.axeVertices = check;
 
-  // ── 8. Write the GLB ──────────────────────────────────────────────────────
+  // ── 8. Flatten the hierarchy before writing it ────────────────────────────
+  // The FBX leaves an empty node in front of every bone, nested forty deep, so
+  // the skeleton reaches the file as 5,599 nodes to express 139 bones. The
+  // runtime loader already collapses them, but doing it here means the file is
+  // smaller and every boot does less work. A node goes only when it is not a
+  // bone, not a mesh, has exactly one child, carries an identity transform and
+  // is named by no animation track.
+  {
+    const protectedNodes = new Set(bones);
+    const animatedNames = new Set();
+    for (const clip of clips) for (const t of clip.tracks) animatedNames.add(t.name.split('.')[0]);
+    let before = 0;
+    root.traverse(() => before++);
+    for (;;) {
+      const candidates = [];
+      root.traverse((o) => candidates.push(o));
+      let cut = 0;
+      for (const node of candidates) {
+        if (node === root || !node.parent) continue;
+        // The wrappers are Bone instances too, so membership in the skeleton is
+        // what protects a node, not its class.
+        if (protectedNodes.has(node) || node.isMesh) continue;
+        if (node.children.length !== 1) continue;
+        if (animatedNames.has(node.name)) continue;
+        node.updateMatrix();
+        const e = node.matrix.elements;
+        let identity = true;
+        for (let i = 0; i < 16; i++) {
+          const want = i % 5 === 0 ? 1 : 0;
+          if (Math.abs(e[i] - want) > 1e-6) { identity = false; break; }
+        }
+        if (!identity) continue;
+        node.parent.add(node.children[0]);
+        node.removeFromParent();
+        cut++;
+      }
+      if (cut === 0) break;
+    }
+    let after = 0;
+    root.traverse(() => after++);
+    root.updateMatrixWorld(true);
+    say('nodes', `${before} -> ${after}`);
+  }
+
+  // ── 9. Write the GLB ──────────────────────────────────────────────────────
   const buffer = await new Promise((resolve, reject) => {
     new GLTFExporter().parse(
       root,
