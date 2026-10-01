@@ -44,10 +44,25 @@ export interface AuthoredEntry {
   /** Yaw in radians for a character not authored facing -Z. */
   yawOffset?: number;
   /**
+   * Relocates a prop that arrived with no rig of its own, onto `host` and
+   * `behind` metres back from it. See `stowLooseProp`.
+   */
+  stow?: { host: string; behind: number };
+  /**
    * Prop bones to re-parent onto the bone that should carry them, named as they
    * appear in the file. See `attachProps`.
+   *
+   * `position` and `rotation` place the prop in the host bone's own space, in
+   * metres and radians, and are needed whenever the file's own placement is
+   * wrong rather than merely parented to the wrong bone. Leaving them out keeps
+   * the pose the prop already holds.
    */
-  attach?: { bone: string; to: string }[];
+  attach?: {
+    bone: string;
+    to: string;
+    position?: [number, number, number];
+    rotation?: [number, number, number];
+  }[];
 }
 
 /**
@@ -58,12 +73,11 @@ export const AUTHORED_MANIFEST: Record<string, AuthoredEntry> = {
   'creep.cleaver': {
     url: '/models/orc.glb',
     height: 2.0,
-    // The hammer hangs off the chest in this rig, not off the hand: the
-    // animator moved it to meet the hand clip by clip. Our clip trimming cut
-    // that down to a single keyframe in walk, run and attack and to none at all
-    // in death, so the weapon holds one pose relative to the torso while the
-    // arm swings, and reads as floating beside the orc.
-    attach: [{ bone: 'ork_hammer_1', to: 'ork_RightHand' }],
+    // The axe ships as its own file with no skeleton (axe.fbx in the source
+    // package), so the FBX merge dropped its vertices onto the default bone and
+    // left it hanging in the air at hip height. Put it across the back, which is
+    // where the reference art carries it.
+    stow: { host: 'ork_Spine2', behind: 0.16 },
   },
 };
 
@@ -116,12 +130,19 @@ function pruneToSkeleton(
     if (node.children.length !== 1) return false;
     if (animated.has(node.name)) return false;
     const child = node.children[0]!;
-    // Carry the transform down rather than assuming these wrappers are
-    // identity, so a file that does put a rotation on one still loads right.
+
+    // Only an identity wrapper may go, and that restriction is not caution, it
+    // is correctness. Folding a wrapper's transform into its child lasts
+    // exactly until an animation track writes that child's position and
+    // quaternion, which it does every frame, throwing the folded-in value away.
+    // The body survived it because these wrappers are identity; anything that
+    // was not would have been silently dropped, which is how the props ended up
+    // detached from the orc.
     node.updateMatrix();
-    child.updateMatrix();
-    child.matrix.premultiply(node.matrix);
-    child.matrix.decompose(child.position, child.quaternion, child.scale);
+    const e = node.matrix.elements;
+    const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    for (let i = 0; i < 16; i++) if (Math.abs(e[i]! - IDENTITY[i]!) > 1e-6) return false;
+
     parent.add(child);
     node.removeFromParent();
     return true;
@@ -161,7 +182,12 @@ function attachProps(
   root: THREE.Object3D,
   mesh: THREE.SkinnedMesh,
   clips: readonly THREE.AnimationClip[],
-  attach: readonly { bone: string; to: string }[],
+  attach: readonly {
+    bone: string;
+    to: string;
+    position?: [number, number, number];
+    rotation?: [number, number, number];
+  }[],
 ): string[] {
   const done: string[] = [];
   const find = (name: string): THREE.Bone | undefined =>
@@ -176,6 +202,10 @@ function attachProps(
     const local = new THREE.Matrix4().copy(host.matrixWorld).invert().multiply(prop.matrixWorld);
     host.add(prop);
     local.decompose(prop.position, prop.quaternion, prop.scale);
+    // An explicit placement replaces the file's, but the scale stays: it holds
+    // the unit conversion the whole character depends on.
+    if (link.position) prop.position.fromArray(link.position);
+    if (link.rotation) prop.quaternion.setFromEuler(new THREE.Euler(...link.rotation));
 
     for (const clip of clips) {
       clip.tracks = clip.tracks.filter((t) => t.name.split('.')[0] !== prop.name);
@@ -184,6 +214,135 @@ function attachProps(
   }
   root.updateMatrixWorld(true);
   return done;
+}
+
+/**
+ * Finds a prop that came in with no rig of its own and puts it where it belongs.
+ *
+ * This orc's axe ships as a separate file, `axe.fbx`, with no skeleton: the
+ * artist expects whoever uses it to attach it. Our FBX merge folded it into the
+ * body mesh instead, and vertices with no weights of their own fell to the
+ * default bone, the hips. The result is an axe hanging in the air beside the
+ * orc at hip height, rigid to the hips, following neither hand nor back. No
+ * amount of re-parenting bones fixes that, because no weapon bone drives it.
+ *
+ * So the geometry is moved rather than the skeleton. The detached piece is
+ * found as a connected component of the index buffer whose centre sits far
+ * outside the body, translated in bind space to sit behind the chest, and
+ * re-weighted onto the host bone so it rides there. Orientation is left alone:
+ * the axe already hangs along its haft, which reads as stowed once it is
+ * against the back.
+ *
+ * Returns the number of vertices moved, or 0 when nothing matched, which is the
+ * correct outcome for a character that arrived properly rigged.
+ */
+function stowLooseProp(mesh: THREE.SkinnedMesh, host: string, behind: number): number {
+  const bones = mesh.skeleton.bones;
+  const hostIndex = bones.findIndex((b) => b.name === host);
+  const hipsIndex = bones.findIndex((b) => /_Hips$/i.test(b.name));
+  if (hostIndex < 0 || hipsIndex < 0) return 0;
+
+  const geometry = mesh.geometry;
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const skinIndex = geometry.getAttribute('skinIndex') as THREE.BufferAttribute;
+  const skinWeight = geometry.getAttribute('skinWeight') as THREE.BufferAttribute;
+  const index = geometry.getIndex();
+  if (!index) return 0;
+
+  // Union-find over the triangles: a prop welded to nothing stays its own island.
+  const parent = new Int32Array(position.count);
+  for (let i = 0; i < parent.length; i++) parent[i] = i;
+  const root = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]!]!;
+      i = parent[i]!;
+    }
+    return i;
+  };
+  const union = (a: number, b: number): void => {
+    const ra = root(a);
+    const rb = root(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+  for (let t = 0; t < index.count; t += 3) {
+    union(index.getX(t), index.getX(t + 1));
+    union(index.getX(t + 1), index.getX(t + 2));
+  }
+
+  // Bind-space frame: where the bones sit before anything animates.
+  const bindPos = (i: number): THREE.Vector3 =>
+    new THREE.Vector3().setFromMatrixPosition(
+      new THREE.Matrix4().copy(mesh.skeleton.boneInverses[i]!).invert(),
+    );
+  const hips = bindPos(hipsIndex);
+  const chest = bindPos(hostIndex);
+  const armIndex = (re: RegExp): number => bones.findIndex((b) => re.test(b.name));
+  const left = armIndex(/LeftArm$|LeftShoulder$/i);
+  const right = armIndex(/RightArm$|RightShoulder$/i);
+  if (left < 0 || right < 0) return 0;
+  const up = chest.clone().sub(hips).normalize();
+  const lateral = bindPos(right).sub(bindPos(left)).normalize();
+  const back = new THREE.Vector3().crossVectors(up, lateral).normalize();
+
+  // Group the vertices by island, keeping each island's centre and how much of
+  // it leans on the hips.
+  const islands = new Map<number, { n: number; sum: THREE.Vector3; hipsHeld: number }>();
+  const v = new THREE.Vector3();
+  for (let i = 0; i < position.count; i++) {
+    const key = root(i);
+    let island = islands.get(key);
+    if (!island) {
+      island = { n: 0, sum: new THREE.Vector3(), hipsHeld: 0 };
+      islands.set(key, island);
+    }
+    island.n++;
+    island.sum.add(v.fromBufferAttribute(position, i));
+    for (let k = 0; k < 4; k++) {
+      if (skinIndex.getComponent(i, k) === hipsIndex && skinWeight.getComponent(i, k) > 0.5) {
+        island.hipsHeld++;
+        break;
+      }
+    }
+  }
+
+  // The body is one big island through the hips. A loose prop is a small one,
+  // held by the hips because nothing else claimed it, sitting well off the axis.
+  const biggest = Math.max(...[...islands.values()].map((i) => i.n));
+  let found: { key: number; centre: THREE.Vector3; n: number } | null = null;
+  let farthest = 0;
+  for (const [key, island] of islands) {
+    if (island.n === biggest || island.n < 8) continue;
+    if (island.hipsHeld < island.n * 0.5) continue;
+    const centre = island.sum.clone().divideScalar(island.n);
+    const offAxis = centre.clone().sub(hips).projectOnPlane(up).length();
+    if (offAxis > farthest) {
+      farthest = offAxis;
+      found = { key, centre, n: island.n };
+    }
+  }
+  if (!found || farthest < chest.distanceTo(hips) * 0.6) return 0;
+
+  const target = chest.clone().addScaledVector(back, behind);
+  const shift = target.sub(found.centre);
+  let moved = 0;
+  for (let i = 0; i < position.count; i++) {
+    if (root(i) !== found.key) continue;
+    position.setXYZ(
+      i,
+      position.getX(i) + shift.x,
+      position.getY(i) + shift.y,
+      position.getZ(i) + shift.z,
+    );
+    skinIndex.setXYZW(i, hostIndex, 0, 0, 0);
+    skinWeight.setXYZW(i, 1, 0, 0, 0);
+    moved++;
+  }
+  position.needsUpdate = true;
+  skinIndex.needsUpdate = true;
+  skinWeight.needsUpdate = true;
+  geometry.computeBoundingSphere();
+  geometry.computeBoundingBox();
+  return moved;
 }
 
 const loader = new GLTFLoader();
@@ -221,6 +380,7 @@ export async function preloadAuthored(): Promise<void> {
 
         pruneToSkeleton(root, skinned, gltf.animations);
         if (entry.attach) attachProps(root, skinned, gltf.animations, entry.attach);
+        if (entry.stow) stowLooseProp(skinned, entry.stow.host, entry.stow.behind);
 
         root.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(root);
