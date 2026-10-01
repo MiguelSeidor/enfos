@@ -96,6 +96,33 @@ export class CreepBatch {
   ) {
     this.capacity = capacity;
 
+    // three draws an array material by walking the geometry's groups and
+    // issuing one call per group. A geometry with no groups therefore draws
+    // NOTHING: no exception, no console warning, no missing-material message,
+    // just empty space where the creep should be while it still moves, fights
+    // and dies. Procedural characters always carry groups because they are
+    // assembled slot by slot, so the whole batch path was built on an invariant
+    // that only held by accident. An authored character arrives as one material
+    // over the whole mesh with no groups at all, and fell straight through it.
+    //
+    // Give a group-less geometry the group it implies, and refuse the ones that
+    // are genuinely inconsistent rather than rendering them half-empty.
+    if (geometry.groups.length === 0) {
+      const total = geometry.index
+        ? geometry.index.count
+        : geometry.getAttribute('position').count;
+      geometry.addGroup(0, total, 0);
+    }
+    for (const g of geometry.groups) {
+      const slot = g.materialIndex ?? 0;
+      if (slot >= sourceMaterials.length) {
+        throw new Error(
+          `CreepBatch(${defId}): group wants material ${slot} but only ` +
+            `${sourceMaterials.length} were supplied; those triangles would not draw.`,
+        );
+      }
+    }
+
     const anim = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
     anim.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute('aAnim', anim);

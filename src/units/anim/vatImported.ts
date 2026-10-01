@@ -92,9 +92,15 @@ export function bakeImportedVat(source: ImportedSource, fps = DEFAULT_FPS): VatB
   const toHalf = THREE.DataUtils.toHalfFloat;
   let maxRadiusSq = 0;
 
-  // The character is baked in the space its own root defines, so whatever
-  // scale normalised it to the roster's height is already in the numbers.
-  const rootScale = root.scale.x;
+  // No scaling is applied to the baked positions, and that is not an omission.
+  // `Skeleton.update` builds each bone matrix as `bone.matrixWorld x
+  // boneInverse`, and the bind inverses were captured before this character was
+  // scaled to the roster's height. The scale therefore survives in the product,
+  // so the skinned result already comes out at final size: measured at 1.98 m
+  // against the 2 m the renderer draws.
+  //
+  // Multiplying by the root scale on top of that is what made every orc two
+  // centimetres tall and invisible on the field while still attacking.
 
   for (const step of plan) {
     const action = mixer.clipAction(step.clip);
@@ -127,7 +133,6 @@ export function bakeImportedVat(source: ImportedSource, fps = DEFAULT_FPS): VatB
           tmpN.copy(vn).transformDirection(bone);
           accN.addScaledVector(tmpN, w);
         }
-        acc.multiplyScalar(rootScale);
         accN.normalize();
 
         const o = rowBase + v * 4;
