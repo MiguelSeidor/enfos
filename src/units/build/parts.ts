@@ -64,7 +64,23 @@ export interface PartEntry {
  * not here, the recipe keeps its procedural part, and nothing else notices. It
  * is what lets heads arrive one creature at a time instead of in a big bang.
  */
-export const PART_MANIFEST: Record<string, PartEntry> = {
+/**
+ * Switched off, not deleted. The parts below took the orc from 3,662 vertices
+ * to 17,777, and the vertex animation texture is one texel per vertex per
+ * frame, so its width went past the 16,384 limit every GPU enforces. The upload
+ * was rejected, the shader read nothing, and every orc in a live match became
+ * invisible while still walking up and attacking.
+ *
+ * `bakeVat` now refuses that outright instead of letting it happen quietly, and
+ * the files stay in `public/models/parts/` because the mechanism is sound and
+ * the work is recoverable. What is not sound is the vertex budget: an authored
+ * part has to be decimated to a creature's share of 16,384, not to whatever the
+ * generator happened to produce.
+ */
+export const PART_MANIFEST: Record<string, PartEntry> = {};
+
+/** Kept for reference; see the note above before putting any of it back. */
+export const PART_MANIFEST_DISABLED: Record<string, PartEntry> = {
   'creep.cleaver.head': { url: '/models/parts/orc-head.glb' },
   'creep.cleaver.torso': { url: '/models/parts/orc-torso.glb' },
   // Generated lying along X, handle at -X and blade at +X, because that is how

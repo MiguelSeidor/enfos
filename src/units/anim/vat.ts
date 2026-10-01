@@ -85,6 +85,24 @@ export function bakeVat(
 
   const width = vertexCount;
   const height = totalRows;
+
+  // One texel per vertex per frame, so the texture is as wide as the character
+  // has vertices. Every GPU has a limit, commonly 16384, and crossing it does
+  // not throw: the upload is rejected with a console warning, the vertex shader
+  // samples nothing, and the creeps render as empty space while still walking
+  // around and attacking. An invisible enemy that still hits you is the worst
+  // way this can fail, so it fails loudly here instead.
+  //
+  // 16384 is the floor the WebGL2 specification guarantees. Reading the real
+  // limit would need a renderer, which the bake does not have and should not
+  // need: a character that only fits on generous hardware is not shippable.
+  const MAX_TEXTURE = 16384;
+  if (width > MAX_TEXTURE) {
+    throw new Error(
+      `bakeVat: ${width} vertices exceeds the ${MAX_TEXTURE} texel texture limit ` +
+        `(${width}x${height}). Reduce the character's vertex count or its frame count.`,
+    );
+  }
   const posData = new Uint16Array(width * height * 4);
   const nrmData = new Uint16Array(width * height * 4);
 
