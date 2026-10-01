@@ -102,6 +102,36 @@ export function bakeImportedVat(source: ImportedSource, fps = DEFAULT_FPS): VatB
   // Multiplying by the root scale on top of that is what made every orc two
   // centimetres tall and invisible on the field while still attacking.
 
+  // Do not reach for `bindMatrix` and `bindMatrixInverse` here. three's shader
+  // needs them because it skins in the mesh's local space and applies the model
+  // matrix afterwards; this bake skips the model matrix and wants world space
+  // directly, which `bone.matrixWorld x boneInverse` already gives. Worse, a
+  // SkinnedMesh in the default `attached` bind mode recomputes
+  // `bindMatrixInverse` from the CURRENT world matrix on every update while
+  // `bindMatrix` keeps what it held at bind time, so the pair stops being
+  // inverses the moment the root is rescaled. Measured on the orc: bindMatrix
+  // scale 1, bindMatrixInverse scale 8.93. Applying both made the character
+  // 17.7 m instead of 1.98 m, which is near enough to standing inside it.
+  //
+  // Authored clips usually carry root motion: the attack lunges forward, the
+  // walk advances a stride per cycle. The simulation owns where a creep is, so
+  // baking that displacement into the texture fights it -- the orc travelled
+  // away from its own instance transform and snapped back, which reads on
+  // screen as vanishing for a few frames mid-attack. Animate in place and let
+  // the simulation move the instance.
+  //
+  // Horizontal only. Vertical root movement is almost always deliberate (a
+  // death drops the body, a leap leaves the ground) and removing it would
+  // flatten those.
+  const boneSet = new Set<THREE.Object3D>(mesh.skeleton.bones);
+  const rootBone =
+    mesh.skeleton.bones.find((b) => !b.parent || !boneSet.has(b.parent)) ?? mesh.skeleton.bones[0];
+  const rootIndex = rootBone ? mesh.skeleton.bones.indexOf(rootBone) : -1;
+  const rootNow = new THREE.Matrix4();
+  const rootHere = new THREE.Vector3();
+  const rootBase = new THREE.Vector3();
+  const rootShift = new THREE.Vector3();
+
   for (const step of plan) {
     const action = mixer.clipAction(step.clip);
     action.reset();
@@ -118,6 +148,20 @@ export function bakeImportedVat(source: ImportedSource, fps = DEFAULT_FPS): VatB
       mesh.skeleton.update();
       const bones = mesh.skeleton.boneMatrices;
 
+      // Where the root sits this frame, in the same space the vertices land in.
+      // Frame 0 is the reference, so a clip without root motion shifts by zero
+      // and nothing about it changes.
+      rootShift.set(0, 0, 0);
+      if (rootIndex >= 0) {
+        // The root bone's offset matrix maps mesh space to world, so its
+        // translation column is where a vertex pinned to the root ends up:
+        // exactly the displacement to cancel.
+        rootNow.fromArray(bones, rootIndex * 16);
+        rootHere.setFromMatrixPosition(rootNow);
+        if (f === 0) rootBase.copy(rootHere);
+        rootShift.set(rootHere.x - rootBase.x, 0, rootHere.z - rootBase.z);
+      }
+
       const rowBase = (step.row + f) * width * 4;
       for (let v = 0; v < vertexCount; v++) {
         vp.fromBufferAttribute(position, v);
@@ -133,6 +177,7 @@ export function bakeImportedVat(source: ImportedSource, fps = DEFAULT_FPS): VatB
           tmpN.copy(vn).transformDirection(bone);
           accN.addScaledVector(tmpN, w);
         }
+        acc.sub(rootShift);
         accN.normalize();
 
         const o = rowBase + v * 4;
