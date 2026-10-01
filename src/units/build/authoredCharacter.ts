@@ -73,8 +73,8 @@ export const AUTHORED_MANIFEST: Record<string, AuthoredEntry> = {
     // Both axes are mis-bound in the file and neither follows the hand that
     // holds it. The conversion gave the right one to the hips and left the
     // left one on a bone that hangs off the spine, so they drift away from the
-    // orc as it moves. Nothing is moved here, only re-bound: the artist
-    // already placed them correctly in the bind pose.
+    // orc as it moves, and the import also left them sitting beside the hands
+    // rather than in them.
     rebind: [
       { dominatedBy: 'ork_Hips', to: 'ork_RightHand', note: 'right axe' },
       { dominatedBy: 'ork_hammer_1', to: 'ork_LeftHand', note: 'left axe' },
@@ -300,11 +300,52 @@ function rebindIslands(
     const from = bones.findIndex((b) => b.name === rule.dominatedBy);
     const to = bones.findIndex((b) => b.name === rule.to);
     if (from < 0 || to < 0) continue;
+    // Where the host bone sits in the pose the mesh was bound in. Everything
+    // below works in that space, which is the space the vertices are stored in.
+    const host = new THREE.Vector3().setFromMatrixPosition(
+      new THREE.Matrix4().copy(mesh.skeleton.boneInverses[to]!).invert(),
+    );
     let moved = 0;
     for (const island of islands.values()) {
       if (island.verts.length === body) continue;
       if ((island.tally.get(from) ?? 0) < island.verts.length * 0.9) continue;
+
+      // Re-binding alone leaves the weapon wherever the broken import put it,
+      // rigid to the hand but not in it. Slide it along until its handle meets
+      // the fist. The handle is one end of the island's longest span, found by
+      // walking twice from the centre, and it is whichever end already sits
+      // nearer the hand -- the blade is the far one. This uses the artist's own
+      // orientation and only changes where the piece sits, never how it is
+      // turned.
+      const at = (v: number): THREE.Vector3 => new THREE.Vector3().fromBufferAttribute(position, v);
+      const centre = new THREE.Vector3();
+      for (const v of island.verts) centre.add(at(v));
+      centre.divideScalar(island.verts.length);
+      const pickFarthest = (origin: THREE.Vector3): THREE.Vector3 => {
+        let best = origin;
+        let far = -1;
+        for (const v of island.verts) {
+          const q = at(v);
+          const d = q.distanceToSquared(origin);
+          if (d > far) {
+            far = d;
+            best = q;
+          }
+        }
+        return best;
+      };
+      const endA = pickFarthest(centre);
+      const endB = pickFarthest(endA);
+      const grip = endA.distanceToSquared(host) <= endB.distanceToSquared(host) ? endA : endB;
+      const shift = host.clone().sub(grip);
+
       for (const v of island.verts) {
+        position.setXYZ(
+          v,
+          position.getX(v) + shift.x,
+          position.getY(v) + shift.y,
+          position.getZ(v) + shift.z,
+        );
         skinIndex.setXYZW(v, to, 0, 0, 0);
         skinWeight.setXYZW(v, 1, 0, 0, 0);
         moved++;
@@ -313,8 +354,11 @@ function rebindIslands(
     if (moved) applied.push({ rule: `${rule.dominatedBy} -> ${rule.to}`, verts: moved });
   }
   if (applied.length) {
+    position.needsUpdate = true;
     skinIndex.needsUpdate = true;
     skinWeight.needsUpdate = true;
+    geometry.computeBoundingSphere();
+    geometry.computeBoundingBox();
   }
   return applied;
 }
