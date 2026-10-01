@@ -25,6 +25,7 @@ import type { GameContext, GameModule, EntityId, UnitState, VisualDescriptor } f
 import { TerrainKey, UnitViewKey, type TerrainService, type UnitViewService } from '@/core/services';
 import { buildCharacter, getCharacter, type CharacterDef } from './catalog';
 import { HeroView } from './render/heroView';
+import { AuthoredView } from './render/authoredView';
 import { CreepBatch, makeVatGeometry } from './render/creepBatch';
 import { bakeVat } from './anim/vat';
 import { bakeImportedVat } from './anim/vatImported';
@@ -40,8 +41,8 @@ interface ViewRecord {
   unit: UnitState;
   def: CharacterDef;
   clip: ClipId;
-  /** Skinned path (heroes / bosses). */
-  view?: HeroView;
+  /** Skinned path: heroes, bosses, and any creature authored by an artist. */
+  view?: HeroView | AuthoredView;
   /** Instanced path (creeps). */
   batch?: CreepBatch;
   slot?: number;
@@ -106,7 +107,18 @@ export class UnitViewModule implements GameModule {
       curFacing: unit.facing,
     };
 
-    if (def.kind === 'creep') {
+    // An authored creature renders as a plain skinned mesh. The instanced
+    // batch is faster but it is also this project's own vertex-animation
+    // bake, and that bake failed silently four times running on exactly this
+    // kind of character. See the header of `render/authoredView.ts`.
+    const authoredSource = def.kind === 'creep' ? getAuthored(def.id) : null;
+    if (authoredSource) {
+      const view = new AuthoredView(authoredSource, record.scale, (unit.id % 13) / 13);
+      view.group.position.set(unit.pos.x, this.terrain.heightAt(unit.pos.x, unit.pos.z), unit.pos.z);
+      view.group.rotation.y = unit.facing;
+      this.root.add(view.group);
+      record.view = view;
+    } else if (def.kind === 'creep') {
       const batch = this.batchFor(def);
       const slot = batch.alloc();
       if (slot === null) {
@@ -227,8 +239,16 @@ export class UnitViewModule implements GameModule {
       if (record.batch && this.time - record.clipSetAt < record.batch.clipDuration(current)) return;
     }
     const prof = record.def.profile;
+    // The threshold is the walk speed itself, not the midpoint between walk
+    // and run. An authored walk cycle covers real ground: measured on the orc,
+    // its stride peaks at 0.78 m and the cycle lasts 2.42 s, so the clip is
+    // built for about 0.64 m/s. The midpoint rule kept a creep moving at
+    // 3.47 m/s in that walk, and feet that cannot cover a fifth of the ground
+    // they travel do not read as walking, they read as gliding. Anything
+    // faster than a walking pace belongs in the run clip, whose stride is
+    // three times longer.
     const desired: ClipId =
-      speed > (prof.walkSpeed + prof.runSpeed) * 0.5 ? 'run' : speed > 0.25 ? 'walk' : 'idle';
+      speed > prof.walkSpeed ? 'run' : speed > 0.25 ? 'walk' : 'idle';
     if (desired !== current) this.setClip(record, desired, 0.16, false);
   }
 
