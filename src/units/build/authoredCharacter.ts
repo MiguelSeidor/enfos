@@ -43,8 +43,8 @@ export interface AuthoredEntry {
   height: number;
   /** Yaw in radians for a character not authored facing -Z. */
   yawOffset?: number;
-  /** Re-binds mis-weighted mesh islands onto the bone that should drive them. See `rebindIslands`. */
-  rebind?: { dominatedBy: string; to: string; note?: string }[];
+  /** Mesh islands the conversion added that do not belong on the character. See `dropIslands`. */
+  drop?: { dominatedBy: string; maxVerts: number; note?: string }[];
   /**
    * Prop bones to re-parent onto the bone that should carry them, named as they
    * appear in the file. See `attachProps`.
@@ -70,15 +70,13 @@ export const AUTHORED_MANIFEST: Record<string, AuthoredEntry> = {
   'creep.cleaver': {
     url: '/models/orc.glb',
     height: 2.0,
-    // Both axes are mis-bound in the file and neither follows the hand that
-    // holds it. The conversion gave the right one to the hips and left the
-    // left one on a bone that hangs off the spine, so they drift away from the
-    // orc as it moves, and the import also left them sitting beside the hands
-    // rather than in them.
-    rebind: [
-      { dominatedBy: 'ork_Hips', to: 'ork_RightHand', note: 'right axe' },
-      { dominatedBy: 'ork_hammer_1', to: 'ork_LeftHand', note: 'left axe' },
-    ],
+    // One island of 96 vertices, weighted entirely to the hips, is an axe the
+    // conversion added by merging the separate axe.fbx. The artist never put it
+    // on the character: the original FBX has the orc armed with the spiked
+    // forearm pieces and nothing in its hands. It is the only detached geometry
+    // in the file and it is what shows up in game as a weapon floating alongside
+    // the orc.
+    drop: [{ dominatedBy: 'ork_Hips', maxVerts: 200, note: 'axe.fbx merged in by mistake' }],
   },
 };
 
@@ -218,36 +216,38 @@ function attachProps(
 }
 
 /**
- * Re-binds a mis-weighted island of mesh onto the bone that should drive it.
+ * Deletes a lump of geometry the conversion added that the character never had.
  *
- * This orc carries an axe in each hand, and in the converted file neither is
- * bound to the hand holding it. The right one is weighted to the hips; the left
- * one to a bone that hangs off the spine. Both therefore stay with the torso
- * while the arms move, which on screen is a weapon drifting beside the orc.
+ * The source package ships the axe as its own unskinned model, `axe.fbx`,
+ * beside the character. Our FBX merge pulled it in with everything else, and
+ * having no weights of its own it fell to the default bone, the hips. The orc
+ * therefore carries an axe welded to its pelvis, hanging in the air beside it,
+ * following neither hand nor back. The artist's own file has no such thing:
+ * rendered side by side, the original is armed with the spiked forearm pieces
+ * and holds nothing, and ours is the same character plus one loose axe.
  *
- * The cause is upstream: the axes arrive as their own unskinned file
- * (`axe.fbx`) and the FBX merge had nothing to weight them to, so they fell to
- * whatever bone was at hand. The artist's bind pose is correct, though, and
- * that is the whole point of fixing it this way. Nothing here moves a vertex.
- * It changes which bone owns one, which is the only thing that was ever wrong,
- * and it leaves the weapons exactly where they were placed.
+ * Splitting the mesh into connected components makes it a single island of 96
+ * vertices answering entirely to `ork_Hips`, and nothing else in the file is
+ * detached. Dropping its triangles is the whole fix. Four attempts were made to
+ * re-home it first -- onto the back, onto a hand, sliding it up its own haft --
+ * and every one of them was moving a piece that should not have been there,
+ * while twice dragging a healthy belt pouch along with it.
  *
- * An island is a connected component of the index buffer. A rule claims one
- * when nearly all of its vertices answer to the named bone, and the largest
- * island -- the body -- is never claimed, so naming a bone that also drives
- * real anatomy is safe.
+ * Triangles go; vertices stay. Nothing else indexes them, so leaving them costs
+ * a few unused entries and avoids rewriting every attribute and every skin
+ * index in the mesh.
  */
-function rebindIslands(
+function dropIslands(
   mesh: THREE.SkinnedMesh,
-  rules: readonly { dominatedBy: string; to: string }[],
-): { rule: string; verts: number }[] {
+  rules: readonly { dominatedBy: string; maxVerts: number }[],
+): number {
   const bones = mesh.skeleton.bones;
   const geometry = mesh.geometry;
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const skinIndex = geometry.getAttribute('skinIndex') as THREE.BufferAttribute;
   const skinWeight = geometry.getAttribute('skinWeight') as THREE.BufferAttribute;
   const index = geometry.getIndex();
-  if (!index) return [];
+  if (!index) return 0;
 
   const parent = new Int32Array(position.count);
   for (let i = 0; i < parent.length; i++) parent[i] = i;
@@ -268,19 +268,6 @@ function rebindIslands(
     union(index.getX(t + 1), index.getX(t + 2));
   }
 
-  const heaviest = (v: number): number => {
-    let best = 0;
-    let bone = -1;
-    for (let k = 0; k < 4; k++) {
-      const w = skinWeight.getComponent(v, k);
-      if (w > best) {
-        best = w;
-        bone = skinIndex.getComponent(v, k);
-      }
-    }
-    return bone;
-  };
-
   const islands = new Map<number, { verts: number[]; tally: Map<number, number> }>();
   for (let v = 0; v < position.count; v++) {
     const key = find(v);
@@ -290,77 +277,45 @@ function rebindIslands(
       islands.set(key, island);
     }
     island.verts.push(v);
-    const bone = heaviest(v);
+    let best = 0;
+    let bone = -1;
+    for (let k = 0; k < 4; k++) {
+      const w = skinWeight.getComponent(v, k);
+      if (w > best) {
+        best = w;
+        bone = skinIndex.getComponent(v, k);
+      }
+    }
     if (bone >= 0) island.tally.set(bone, (island.tally.get(bone) ?? 0) + 1);
   }
   const body = Math.max(...[...islands.values()].map((i) => i.verts.length));
 
-  const applied: { rule: string; verts: number }[] = [];
+  // The body island is never a candidate, so naming a bone that also drives
+  // real anatomy, as the hips do, cannot delete the character.
+  const doomed = new Set<number>();
   for (const rule of rules) {
     const from = bones.findIndex((b) => b.name === rule.dominatedBy);
-    const to = bones.findIndex((b) => b.name === rule.to);
-    if (from < 0 || to < 0) continue;
-    // Where the host bone sits in the pose the mesh was bound in. Everything
-    // below works in that space, which is the space the vertices are stored in.
-    const host = new THREE.Vector3().setFromMatrixPosition(
-      new THREE.Matrix4().copy(mesh.skeleton.boneInverses[to]!).invert(),
-    );
-    let moved = 0;
+    if (from < 0) continue;
     for (const island of islands.values()) {
-      if (island.verts.length === body) continue;
+      if (island.verts.length === body || island.verts.length > rule.maxVerts) continue;
       if ((island.tally.get(from) ?? 0) < island.verts.length * 0.9) continue;
-
-      // Re-binding alone leaves the weapon wherever the broken import put it,
-      // rigid to the hand but not in it. Slide it along until its handle meets
-      // the fist. The handle is one end of the island's longest span, found by
-      // walking twice from the centre, and it is whichever end already sits
-      // nearer the hand -- the blade is the far one. This uses the artist's own
-      // orientation and only changes where the piece sits, never how it is
-      // turned.
-      const at = (v: number): THREE.Vector3 => new THREE.Vector3().fromBufferAttribute(position, v);
-      const centre = new THREE.Vector3();
-      for (const v of island.verts) centre.add(at(v));
-      centre.divideScalar(island.verts.length);
-      const pickFarthest = (origin: THREE.Vector3): THREE.Vector3 => {
-        let best = origin;
-        let far = -1;
-        for (const v of island.verts) {
-          const q = at(v);
-          const d = q.distanceToSquared(origin);
-          if (d > far) {
-            far = d;
-            best = q;
-          }
-        }
-        return best;
-      };
-      const endA = pickFarthest(centre);
-      const endB = pickFarthest(endA);
-      const grip = endA.distanceToSquared(host) <= endB.distanceToSquared(host) ? endA : endB;
-      const shift = host.clone().sub(grip);
-
-      for (const v of island.verts) {
-        position.setXYZ(
-          v,
-          position.getX(v) + shift.x,
-          position.getY(v) + shift.y,
-          position.getZ(v) + shift.z,
-        );
-        skinIndex.setXYZW(v, to, 0, 0, 0);
-        skinWeight.setXYZW(v, 1, 0, 0, 0);
-        moved++;
-      }
+      for (const v of island.verts) doomed.add(v);
     }
-    if (moved) applied.push({ rule: `${rule.dominatedBy} -> ${rule.to}`, verts: moved });
   }
-  if (applied.length) {
-    position.needsUpdate = true;
-    skinIndex.needsUpdate = true;
-    skinWeight.needsUpdate = true;
-    geometry.computeBoundingSphere();
-    geometry.computeBoundingBox();
+  if (doomed.size === 0) return 0;
+
+  const kept: number[] = [];
+  for (let t = 0; t < index.count; t += 3) {
+    const a = index.getX(t);
+    const b = index.getX(t + 1);
+    const c = index.getX(t + 2);
+    if (doomed.has(a) || doomed.has(b) || doomed.has(c)) continue;
+    kept.push(a, b, c);
   }
-  return applied;
+  geometry.setIndex(kept);
+  geometry.computeBoundingSphere();
+  geometry.computeBoundingBox();
+  return doomed.size;
 }
 
 const loader = new GLTFLoader();
@@ -398,7 +353,7 @@ export async function preloadAuthored(): Promise<void> {
 
         pruneToSkeleton(root, skinned, gltf.animations);
         if (entry.attach) attachProps(root, skinned, gltf.animations, entry.attach);
-        if (entry.rebind) rebindIslands(skinned, entry.rebind);
+        if (entry.drop) dropIslands(skinned, entry.drop);
 
         root.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(root);
