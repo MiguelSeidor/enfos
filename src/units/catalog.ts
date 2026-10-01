@@ -1594,11 +1594,16 @@ const cleaver: CharacterDef = {
     // cleaver arrives as one mesh, and three procedural pieces inside it would
     // only poke through. `rot` matches the procedural grip so the swing reads
     // the same either way.
+    // This orc's hand sits at y 0.294, nearly shin height, because the arms are
+    // long and the stoop drops the shoulder. So the cleaver hangs low by design,
+    // exactly where the procedural one hung. What it needs is to hang CLEAR:
+    // pushed out from the hip and tilted away from the body, or a 1 m blade
+    // standing up from a hand that low runs straight through the thigh.
     const importedWeapon = b.addImported('creep.cleaver.weapon', {
       slot: 'metal',
       bone: 'hand.R',
-      at: [0.02, 0.1, 0.04],
-      rot: [0.3, 0, 0.12],
+      at: [-0.13, 0.26, 0.16],
+      rot: [0.26, 0, 0.2],
       scale: 1,
       bind: { bones: ['hand.R'], rigid: true },
       uvScale: 1.2,

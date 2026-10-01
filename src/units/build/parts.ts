@@ -67,6 +67,14 @@ export interface PartEntry {
 export const PART_MANIFEST: Record<string, PartEntry> = {
   'creep.cleaver.head': { url: '/models/parts/orc-head.glb' },
   'creep.cleaver.torso': { url: '/models/parts/orc-torso.glb' },
+  // Generated lying along X, handle at -X and blade at +X, because that is how
+  // a weapon is drawn on a reference sheet. A quarter turn about Z stands it
+  // up with the handle down and the blade above, which is the layout the
+  // recipe's grip offsets were written against.
+  'creep.cleaver.weapon': {
+    url: '/models/parts/orc-cleaver.glb',
+    rot: [0, 0, Math.PI / 2],
+  },
 };
 
 const loader = new GLTFLoader();
