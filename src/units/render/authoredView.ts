@@ -62,11 +62,15 @@ export class AuthoredView {
       if (!mesh) mesh = s;
       s.castShadow = true;
       s.receiveShadow = true;
-      // Culling is off rather than padded. A bounding sphere sized for the rest
-      // pose clips a sprawling death, and getting that wrong fails silently in
-      // exactly the way this file exists to stop. Creeps are small and the
-      // budget is a few hundred, so the saved cull is not worth the risk.
-      s.frustumCulled = false;
+      // Cull, but against a sphere with a lot of slack. The bind pose is a
+      // standing figure and a death sprawls well outside it, so a tight sphere
+      // would pop creeps out of view mid-clip. Three and a half times the rest
+      // radius costs nothing and leaves no clip able to reach the edge, while
+      // still skipping the draw and the skinning for everything off screen,
+      // which is most of a wave most of the time.
+      if (!s.geometry.boundingSphere) s.geometry.computeBoundingSphere();
+      s.boundingSphere = s.geometry.boundingSphere!.clone();
+      s.boundingSphere.radius *= 3.5;
     });
 
     this.mixer = new THREE.AnimationMixer(root);
@@ -98,16 +102,26 @@ export class AuthoredView {
     if (!next) return;
     const looping = LOOPING.has(clip);
 
+    // A loop already running is left alone; retriggering it would snap the
+    // cycle back to its first frame on every call.
     if (next === this.current && looping) return;
 
     next.reset();
     next.enabled = true;
     next.setEffectiveWeight(1);
-    if (this.current && this.current !== next && fade > 0) {
+    if (this.current === next) {
+      // Retriggering a one-shot that is already the current action. It must NOT
+      // cross-fade, because cross-fading an action with itself schedules a fade
+      // out and a fade in on the same weight: the weight collapses to zero and
+      // the character vanishes for the length of the fade. That is the blink
+      // seen on every attack after the first, when a second attack command
+      // arrives while the first is still the current clip.
+      next.play();
+    } else if (this.current && fade > 0) {
       this.current.crossFadeTo(next, fade, false);
       next.play();
     } else {
-      if (this.current && this.current !== next) this.current.stop();
+      if (this.current) this.current.stop();
       next.play();
     }
 
