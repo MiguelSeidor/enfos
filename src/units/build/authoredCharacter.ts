@@ -43,11 +43,8 @@ export interface AuthoredEntry {
   height: number;
   /** Yaw in radians for a character not authored facing -Z. */
   yawOffset?: number;
-  /**
-   * Relocates a prop that arrived with no rig of its own, onto `host` and
-   * `behind` metres back from it. See `stowLooseProp`.
-   */
-  stow?: { host: string; behind: number };
+  /** Re-binds mis-weighted mesh islands onto the bone that should drive them. See `rebindIslands`. */
+  rebind?: { dominatedBy: string; to: string; note?: string }[];
   /**
    * Prop bones to re-parent onto the bone that should carry them, named as they
    * appear in the file. See `attachProps`.
@@ -73,11 +70,15 @@ export const AUTHORED_MANIFEST: Record<string, AuthoredEntry> = {
   'creep.cleaver': {
     url: '/models/orc.glb',
     height: 2.0,
-    // The axe ships as its own file with no skeleton (axe.fbx in the source
-    // package), so the FBX merge dropped its vertices onto the default bone and
-    // left it hanging in the air at hip height. Put it across the back, which is
-    // where the reference art carries it.
-    stow: { host: 'ork_Spine2', behind: 0.16 },
+    // Both axes are mis-bound in the file and neither follows the hand that
+    // holds it. The conversion gave the right one to the hips and left the
+    // left one on a bone that hangs off the spine, so they drift away from the
+    // orc as it moves. Nothing is moved here, only re-bound: the artist
+    // already placed them correctly in the bind pose.
+    rebind: [
+      { dominatedBy: 'ork_Hips', to: 'ork_RightHand', note: 'right axe' },
+      { dominatedBy: 'ork_hammer_1', to: 'ork_LeftHand', note: 'left axe' },
+    ],
   },
 };
 
@@ -217,42 +218,40 @@ function attachProps(
 }
 
 /**
- * Finds a prop that came in with no rig of its own and puts it where it belongs.
+ * Re-binds a mis-weighted island of mesh onto the bone that should drive it.
  *
- * This orc's axe ships as a separate file, `axe.fbx`, with no skeleton: the
- * artist expects whoever uses it to attach it. Our FBX merge folded it into the
- * body mesh instead, and vertices with no weights of their own fell to the
- * default bone, the hips. The result is an axe hanging in the air beside the
- * orc at hip height, rigid to the hips, following neither hand nor back. No
- * amount of re-parenting bones fixes that, because no weapon bone drives it.
+ * This orc carries an axe in each hand, and in the converted file neither is
+ * bound to the hand holding it. The right one is weighted to the hips; the left
+ * one to a bone that hangs off the spine. Both therefore stay with the torso
+ * while the arms move, which on screen is a weapon drifting beside the orc.
  *
- * So the geometry is moved rather than the skeleton. The detached piece is
- * found as a connected component of the index buffer whose centre sits far
- * outside the body, translated in bind space to sit behind the chest, and
- * re-weighted onto the host bone so it rides there. Orientation is left alone:
- * the axe already hangs along its haft, which reads as stowed once it is
- * against the back.
+ * The cause is upstream: the axes arrive as their own unskinned file
+ * (`axe.fbx`) and the FBX merge had nothing to weight them to, so they fell to
+ * whatever bone was at hand. The artist's bind pose is correct, though, and
+ * that is the whole point of fixing it this way. Nothing here moves a vertex.
+ * It changes which bone owns one, which is the only thing that was ever wrong,
+ * and it leaves the weapons exactly where they were placed.
  *
- * Returns the number of vertices moved, or 0 when nothing matched, which is the
- * correct outcome for a character that arrived properly rigged.
+ * An island is a connected component of the index buffer. A rule claims one
+ * when nearly all of its vertices answer to the named bone, and the largest
+ * island -- the body -- is never claimed, so naming a bone that also drives
+ * real anatomy is safe.
  */
-function stowLooseProp(mesh: THREE.SkinnedMesh, host: string, behind: number): number {
+function rebindIslands(
+  mesh: THREE.SkinnedMesh,
+  rules: readonly { dominatedBy: string; to: string }[],
+): { rule: string; verts: number }[] {
   const bones = mesh.skeleton.bones;
-  const hostIndex = bones.findIndex((b) => b.name === host);
-  const hipsIndex = bones.findIndex((b) => /_Hips$/i.test(b.name));
-  if (hostIndex < 0 || hipsIndex < 0) return 0;
-
   const geometry = mesh.geometry;
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const skinIndex = geometry.getAttribute('skinIndex') as THREE.BufferAttribute;
   const skinWeight = geometry.getAttribute('skinWeight') as THREE.BufferAttribute;
   const index = geometry.getIndex();
-  if (!index) return 0;
+  if (!index) return [];
 
-  // Union-find over the triangles: a prop welded to nothing stays its own island.
   const parent = new Int32Array(position.count);
   for (let i = 0; i < parent.length; i++) parent[i] = i;
-  const root = (i: number): number => {
+  const find = (i: number): number => {
     while (parent[i] !== i) {
       parent[i] = parent[parent[i]!]!;
       i = parent[i]!;
@@ -260,8 +259,8 @@ function stowLooseProp(mesh: THREE.SkinnedMesh, host: string, behind: number): n
     return i;
   };
   const union = (a: number, b: number): void => {
-    const ra = root(a);
-    const rb = root(b);
+    const ra = find(a);
+    const rb = find(b);
     if (ra !== rb) parent[ra] = rb;
   };
   for (let t = 0; t < index.count; t += 3) {
@@ -269,80 +268,55 @@ function stowLooseProp(mesh: THREE.SkinnedMesh, host: string, behind: number): n
     union(index.getX(t + 1), index.getX(t + 2));
   }
 
-  // Bind-space frame: where the bones sit before anything animates.
-  const bindPos = (i: number): THREE.Vector3 =>
-    new THREE.Vector3().setFromMatrixPosition(
-      new THREE.Matrix4().copy(mesh.skeleton.boneInverses[i]!).invert(),
-    );
-  const hips = bindPos(hipsIndex);
-  const chest = bindPos(hostIndex);
-  const armIndex = (re: RegExp): number => bones.findIndex((b) => re.test(b.name));
-  const left = armIndex(/LeftArm$|LeftShoulder$/i);
-  const right = armIndex(/RightArm$|RightShoulder$/i);
-  if (left < 0 || right < 0) return 0;
-  const up = chest.clone().sub(hips).normalize();
-  const lateral = bindPos(right).sub(bindPos(left)).normalize();
-  const back = new THREE.Vector3().crossVectors(up, lateral).normalize();
-
-  // Group the vertices by island, keeping each island's centre and how much of
-  // it leans on the hips.
-  const islands = new Map<number, { n: number; sum: THREE.Vector3; hipsHeld: number }>();
-  const v = new THREE.Vector3();
-  for (let i = 0; i < position.count; i++) {
-    const key = root(i);
-    let island = islands.get(key);
-    if (!island) {
-      island = { n: 0, sum: new THREE.Vector3(), hipsHeld: 0 };
-      islands.set(key, island);
-    }
-    island.n++;
-    island.sum.add(v.fromBufferAttribute(position, i));
+  const heaviest = (v: number): number => {
+    let best = 0;
+    let bone = -1;
     for (let k = 0; k < 4; k++) {
-      if (skinIndex.getComponent(i, k) === hipsIndex && skinWeight.getComponent(i, k) > 0.5) {
-        island.hipsHeld++;
-        break;
+      const w = skinWeight.getComponent(v, k);
+      if (w > best) {
+        best = w;
+        bone = skinIndex.getComponent(v, k);
       }
     }
-  }
+    return bone;
+  };
 
-  // The body is one big island through the hips. A loose prop is a small one,
-  // held by the hips because nothing else claimed it, sitting well off the axis.
-  const biggest = Math.max(...[...islands.values()].map((i) => i.n));
-  let found: { key: number; centre: THREE.Vector3; n: number } | null = null;
-  let farthest = 0;
-  for (const [key, island] of islands) {
-    if (island.n === biggest || island.n < 8) continue;
-    if (island.hipsHeld < island.n * 0.5) continue;
-    const centre = island.sum.clone().divideScalar(island.n);
-    const offAxis = centre.clone().sub(hips).projectOnPlane(up).length();
-    if (offAxis > farthest) {
-      farthest = offAxis;
-      found = { key, centre, n: island.n };
+  const islands = new Map<number, { verts: number[]; tally: Map<number, number> }>();
+  for (let v = 0; v < position.count; v++) {
+    const key = find(v);
+    let island = islands.get(key);
+    if (!island) {
+      island = { verts: [], tally: new Map() };
+      islands.set(key, island);
     }
+    island.verts.push(v);
+    const bone = heaviest(v);
+    if (bone >= 0) island.tally.set(bone, (island.tally.get(bone) ?? 0) + 1);
   }
-  if (!found || farthest < chest.distanceTo(hips) * 0.6) return 0;
+  const body = Math.max(...[...islands.values()].map((i) => i.verts.length));
 
-  const target = chest.clone().addScaledVector(back, behind);
-  const shift = target.sub(found.centre);
-  let moved = 0;
-  for (let i = 0; i < position.count; i++) {
-    if (root(i) !== found.key) continue;
-    position.setXYZ(
-      i,
-      position.getX(i) + shift.x,
-      position.getY(i) + shift.y,
-      position.getZ(i) + shift.z,
-    );
-    skinIndex.setXYZW(i, hostIndex, 0, 0, 0);
-    skinWeight.setXYZW(i, 1, 0, 0, 0);
-    moved++;
+  const applied: { rule: string; verts: number }[] = [];
+  for (const rule of rules) {
+    const from = bones.findIndex((b) => b.name === rule.dominatedBy);
+    const to = bones.findIndex((b) => b.name === rule.to);
+    if (from < 0 || to < 0) continue;
+    let moved = 0;
+    for (const island of islands.values()) {
+      if (island.verts.length === body) continue;
+      if ((island.tally.get(from) ?? 0) < island.verts.length * 0.9) continue;
+      for (const v of island.verts) {
+        skinIndex.setXYZW(v, to, 0, 0, 0);
+        skinWeight.setXYZW(v, 1, 0, 0, 0);
+        moved++;
+      }
+    }
+    if (moved) applied.push({ rule: `${rule.dominatedBy} -> ${rule.to}`, verts: moved });
   }
-  position.needsUpdate = true;
-  skinIndex.needsUpdate = true;
-  skinWeight.needsUpdate = true;
-  geometry.computeBoundingSphere();
-  geometry.computeBoundingBox();
-  return moved;
+  if (applied.length) {
+    skinIndex.needsUpdate = true;
+    skinWeight.needsUpdate = true;
+  }
+  return applied;
 }
 
 const loader = new GLTFLoader();
@@ -380,7 +354,7 @@ export async function preloadAuthored(): Promise<void> {
 
         pruneToSkeleton(root, skinned, gltf.animations);
         if (entry.attach) attachProps(root, skinned, gltf.animations, entry.attach);
-        if (entry.stow) stowLooseProp(skinned, entry.stow.host, entry.stow.behind);
+        if (entry.rebind) rebindIslands(skinned, entry.rebind);
 
         root.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(root);
