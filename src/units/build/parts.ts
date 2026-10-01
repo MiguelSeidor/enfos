@@ -75,6 +75,14 @@ export const PART_MANIFEST: Record<string, PartEntry> = {
     url: '/models/parts/orc-cleaver.glb',
     rot: [0, 0, Math.PI / 2],
   },
+  // Limbs. Each was cut out of a mesh TRELLIS built as a whole body: asked for
+  // one arm it returns two arms on a torso, because its prior is complete
+  // figures and an isolated limb is the case that fights it hardest. Cutting
+  // one out of what it wants to make is cheaper than arguing with it.
+  'creep.cleaver.arm': { url: '/models/parts/orc-arm.glb' },
+  'creep.cleaver.hips': { url: '/models/parts/orc-hips.glb' },
+  'creep.cleaver.thigh': { url: '/models/parts/orc-thigh.glb' },
+  'creep.cleaver.shin': { url: '/models/parts/orc-shin.glb' },
 };
 
 const loader = new GLTFLoader();

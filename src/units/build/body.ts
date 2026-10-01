@@ -94,6 +94,14 @@ export interface BodyOptions {
   torso?: boolean;
   /** Emits the arm segments and hands. Off for winged and armless plans. */
   arms?: boolean;
+  /**
+   * Emits the leg segments and boots.
+   *
+   * Off when a recipe supplies authored legs. Separate from `robe`, which also
+   * removes the legs but puts a cone in their place; this leaves the space
+   * empty for something else to fill.
+   */
+  legs?: boolean;
   /** Skips legs and emits a conical robe from the pelvis instead. */
   robe?: {
     slot: SlotName;
@@ -257,7 +265,7 @@ export function addBody(b: CharacterBuilder, rig: Rig, o: BodyOptions): void {
   // ── Legs, or a robe in their place.
   if (o.robe) {
     addRobe(b, rig, o.robe);
-  } else if (rig.index[B.hipL] !== undefined) {
+  } else if (o.legs !== false && rig.index[B.hipL] !== undefined) {
     addLegs(b, rig, o, round);
   }
 }

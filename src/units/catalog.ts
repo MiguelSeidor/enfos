@@ -1371,6 +1371,8 @@ const cleaver: CharacterDef = {
       // torso already has that mass sculpted into it. Leaving both made the
       // silhouette two rectangular slabs with a small body between them.
       armScale: hasPart('creep.cleaver.torso') ? 0.95 : 1.3,
+      arms: !hasPart('creep.cleaver.arm'),
+      legs: !hasPart('creep.cleaver.thigh'),
       legScale: 1.2,
       handScale: 1.7,
       bootScale: 1.3,
@@ -1402,6 +1404,59 @@ const cleaver: CharacterDef = {
       scale: 0.85,
       bind: { bones: [B.chest], rigid: true },
       uvScale: 1.4,
+    });
+
+    // ── Limbs. One arm and one leg were authored and both are mirrored, so a
+    // creature costs one generation per limb rather than two.
+    //
+    // Each is bound rigid to the joint ABOVE it: the arm to the shoulder, the
+    // thigh to the hip, the shin to the knee. That is the whole trick, and it
+    // is why a limb can be authored at all. What bends is the joint between two
+    // segments, and a segment itself never deforms.
+    //
+    // The arm is scaled unevenly on purpose. A naturally drawn arm is 0.6 long
+    // and 0.23 thick; this orc's shoulder sits at 1.442 and its hand at 0.294,
+    // so the arm has to span 1.148. Scaled uniformly it would be 0.45 thick,
+    // wider than the shoulder it hangs from. Stretched lengthwise instead it
+    // reads as the long, knuckle-dragging arm the silhouette was designed
+    // around.
+    b.addImported('creep.cleaver.arm', {
+      slot: 'flesh',
+      bone: B.shoulderR,
+      at: [0, -0.574, 0],
+      scale: [1.15, 1.9, 1.15],
+      mirror: true,
+      bind: { bones: [B.shoulderR], rigid: true },
+      uvScale: 1.1,
+    });
+    b.addImported('creep.cleaver.thigh', {
+      slot: 'flesh',
+      bone: B.hipR,
+      at: [0, -0.205, 0],
+      scale: 1.15,
+      mirror: true,
+      bind: { bones: [B.hipR], rigid: true },
+      uvScale: 1.1,
+    });
+    b.addImported('creep.cleaver.shin', {
+      slot: 'flesh',
+      bone: B.kneeR,
+      at: [0, -0.18, 0],
+      scale: 1.1,
+      mirror: true,
+      bind: { bones: [B.kneeR], rigid: true },
+      uvScale: 1.1,
+    });
+    // Hips and the ragged skirt, as one piece on the pelvis. It also replaces
+    // the procedural loincloth, which rendered as a black void between the
+    // legs rather than as cloth.
+    const importedHips = b.addImported('creep.cleaver.hips', {
+      slot: 'leather',
+      bone: B.pelvis,
+      at: [0, 0.03, 0],
+      scale: 1.2,
+      bind: { bones: [B.pelvis], rigid: true },
+      uvScale: 1.2,
     });
 
     if (!importedTorso) {
@@ -1577,16 +1632,18 @@ const cleaver: CharacterDef = {
         uvScale: 1.2,
       });
     }
-    clothPanel(b, rig, {
-      slot: 'cloth',
-      bones: [B.pelvis],
-      topY: pelvis[1] + 0.04,
-      bottomY: pelvis[1] - 0.46,
-      topW: 0.34,
-      bottomW: 0.28,
-      z: p.hipHalfWidth * 1.05,
-      hemPoint: 0.35,
-    });
+    if (!importedHips) {
+      clothPanel(b, rig, {
+        slot: 'cloth',
+        bones: [B.pelvis],
+        topY: pelvis[1] + 0.04,
+        bottomY: pelvis[1] - 0.46,
+        topW: 0.34,
+        bottomW: 0.28,
+        z: p.hipHalfWidth * 1.05,
+        hemPoint: 0.35,
+      });
+    }
 
     // ── Cleaver: a slab as wide as his chest, held low in the right hand.
     //

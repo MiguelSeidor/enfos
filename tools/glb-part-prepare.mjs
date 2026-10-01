@@ -24,10 +24,17 @@
  *    procedural skin apply to it; the generated texture would never be sampled
  *    and is pure payload.
  *
- *   node tools/glb-part-prepare.mjs in.glb out.glb [--tris=800] [--keep=minY,maxY,minZ,maxZ]
+ *   node tools/glb-part-prepare.mjs in.glb out.glb [--tris=800]
+ *     [--rot=x,y,z] [--keep=minX,maxX,minY,maxY,minZ,maxZ]
  *
- * `--keep` is in the model's own units, after centring, and any axis may be
- * omitted with `_`. Run once without it and read the printed bounds first.
+ * `--keep` is in the model's own units, after centring and after `--rot`, and
+ * any bound may be omitted with `_`. Run once with neither and read the printed
+ * bounds first.
+ *
+ * `--rot` (XYZ Euler, radians) runs before the cut, which is what makes a limb
+ * usable: TRELLIS returns arms angled out from a body, and an axis-aligned box
+ * cannot separate an angled arm at the elbow. Stand it upright first and the
+ * cut is one horizontal plane.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { MeshoptSimplifier } from 'meshoptimizer';
@@ -186,6 +193,36 @@ for (let i = 0; i < positions.length; i += 3) {
 const centre = [0, 1, 2].map((c) => (min[c] + max[c]) / 2);
 for (let i = 0; i < positions.length; i += 3) for (let c = 0; c < 3; c++) positions[i + c] -= centre[c];
 
+// Optional reorientation, before anything measures or cuts. Applied here so the
+// printed bounds and the --keep box are both in the rotated frame, which is the
+// only frame a person can reason about when aiming a cut.
+const rotSpec = flag('rot');
+if (rotSpec) {
+  const [rx, ry, rz] = rotSpec.split(',').map(Number);
+  const cx = Math.cos(rx), sx = Math.sin(rx);
+  const cy = Math.cos(ry), sy = Math.sin(ry);
+  const cz = Math.cos(rz), sz = Math.sin(rz);
+  for (let i = 0; i < positions.length; i += 3) {
+    let x = positions[i], y = positions[i + 1], z = positions[i + 2];
+    // XYZ order, matching three's default Euler so a value found here can be
+    // moved into a manifest entry unchanged.
+    let ty = y * cx - z * sx; let tz = y * sx + z * cx; y = ty; z = tz;
+    let tx = x * cy + z * sy; tz = -x * sy + z * cy; x = tx; z = tz;
+    tx = x * cz - y * sz; ty = x * sz + y * cz; x = tx; y = ty;
+    positions[i] = x; positions[i + 1] = y; positions[i + 2] = z;
+  }
+  // Re-measure: the box that mattered before the turn is not the box now.
+  min = [Infinity, Infinity, Infinity];
+  max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let c = 0; c < 3; c++) {
+      if (positions[i + c] < min[c]) min[c] = positions[i + c];
+      if (positions[i + c] > max[c]) max[c] = positions[i + c];
+    }
+  }
+  centre[0] = centre[1] = centre[2] = 0;
+}
+
 // Weld co-located vertices before anything else. A generated mesh splits
 // vertices along every UV seam, so 95,170 triangles arrive carrying 58,513
 // vertices where a closed surface needs about 47,600. Those duplicates are
@@ -246,25 +283,62 @@ function trim(indexArray) {
   const raw = keepSpec.split(',');
   const bound = (i, fallback) => (raw[i] === undefined || raw[i] === '_' ? fallback : Number(raw[i]));
   const keep = {
-    minY: bound(0, -Infinity), maxY: bound(1, Infinity),
-    minZ: bound(2, -Infinity), maxZ: bound(3, Infinity),
+    minX: bound(0, -Infinity), maxX: bound(1, Infinity),
+    minY: bound(2, -Infinity), maxY: bound(3, Infinity),
+    minZ: bound(4, -Infinity), maxZ: bound(5, Infinity),
   };
   const kept = [];
   for (let t = 0; t < indexArray.length; t += 3) {
     // By centroid, so a triangle straddling the cut goes whole rather than
     // leaving a ragged half-triangle behind.
-    let cy = 0, cz = 0;
+    let cx = 0, cy = 0, cz = 0;
     for (let k = 0; k < 3; k++) {
+      cx += positions[indexArray[t + k] * 3];
       cy += positions[indexArray[t + k] * 3 + 1];
       cz += positions[indexArray[t + k] * 3 + 2];
     }
-    cy /= 3; cz /= 3;
-    if (cy >= keep.minY && cy <= keep.maxY && cz >= keep.minZ && cz <= keep.maxZ) {
+    cx /= 3; cy /= 3; cz /= 3;
+    if (
+      cx >= keep.minX && cx <= keep.maxX &&
+      cy >= keep.minY && cy <= keep.maxY &&
+      cz >= keep.minZ && cz <= keep.maxZ
+    ) {
       kept.push(indexArray[t], indexArray[t + 1], indexArray[t + 2]);
     }
   }
   console.log(`trim ${indexArray.length / 3} -> ${kept.length / 3} tris`);
   return Uint32Array.from(kept);
+}
+
+/**
+ * Re-centres the surviving triangles on their own bounding box.
+ *
+ * Centring happens before the cut, on the whole mesh, because the cut box has
+ * to be expressed in some frame a person can read off the printed bounds. But
+ * that leaves every piece carrying the WHOLE mesh's origin: a thigh cut from
+ * y -0.25..0.05 sits a quarter of a unit below wherever you place it. Pieces
+ * are far easier to place by their middle, so this moves the origin there and
+ * reports the shift, which is also the offset from the original pivot if a
+ * recipe ever needs it back.
+ */
+function recentre(indexArray) {
+  // Mutates `posArray`, NOT `positions`. The simplifier works on a Float32Array
+  // copy taken before the trim, and the writer reads that copy back; shifting
+  // the original array instead is a silent no-op that prints a convincing
+  // number and changes nothing in the file.
+  const used = new Set(indexArray);
+  let lo = [Infinity, Infinity, Infinity];
+  let hi = [-Infinity, -Infinity, -Infinity];
+  for (const v of used) {
+    for (let c = 0; c < 3; c++) {
+      const value = posArray[v * 3 + c];
+      if (value < lo[c]) lo[c] = value;
+      if (value > hi[c]) hi[c] = value;
+    }
+  }
+  const shift = [0, 1, 2].map((c) => (lo[c] + hi[c]) / 2);
+  for (const v of used) for (let c = 0; c < 3; c++) posArray[v * 3 + c] -= shift[c];
+  console.log(`recentre by ${shift.map((n) => n.toFixed(3)).join(', ')}`);
 }
 
 /** Share of the mesh the trim will take, so the budget can be raised to match. */
@@ -302,7 +376,15 @@ const posArray = Float32Array.from(positions);
 // shell with no face left. Simplifying before the trim is what makes it
 // unnecessary.
 const bound = Number(flag('error') ?? 0.25);
-const budget = Math.ceil((targetTris / survivingFraction()) * 3);
+// Clamped to what the mesh actually has: the budget is inflated by the share
+// the trim is about to remove, and asking for more triangles than exist is an
+// assertion failure inside the simplifier rather than a no-op.
+// The index count must stay a multiple of three, so the rounding happens on
+// triangles and the multiply comes after.
+const budget = Math.min(
+  Math.ceil(targetTris / survivingFraction()) * 3,
+  Math.floor(indices.length / 3) * 3,
+);
 let working = Uint32Array.from(indices);
 let error = 0;
 for (let pass = 0; pass < 8; pass++) {
@@ -314,6 +396,10 @@ for (let pass = 0; pass < 8; pass++) {
 }
 console.log(`simplify -> ${working.length / 3} tris (error ${(error * 100).toFixed(2)}%)`);
 const simplified = trim(working);
+// Trimmed pieces are re-centred by default: a piece is placed by its middle in
+// every recipe, and leaving it on the whole mesh's origin makes every offset a
+// puzzle. --no-recentre keeps the original pivot.
+if (keepSpec && !args.includes('--no-recentre')) recentre(simplified);
 
 // Compact: drop vertices the simplifier no longer references.
 const used = new Map();
