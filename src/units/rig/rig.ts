@@ -399,6 +399,16 @@ export function computeSkinWeights(
       let w = Math.exp(-d * d * inv2s2);
       if (k === 0) w *= bias;
       w += k === 0 ? 1e-4 : 0;
+      // The id is rewritten every time, not just the weight. `scratch` is
+      // reused across vertices and gets sorted below, so by the second vertex
+      // `scratch[k]` no longer holds `ids[k]`: writing only the weight pairs
+      // each bone's distance with whatever bone happened to sort into that
+      // slot for the previous vertex. With two or three adjacent bones the
+      // damage is a subtle smear; with a whole skeleton it is every vertex
+      // bound to an arbitrary bone, and the mesh explodes into loose triangles
+      // the moment anything moves. That is what made importing a whole body
+      // look like a bind-pose problem when it never was one.
+      scratch[k]!.id = b;
       scratch[k]!.w = w;
       total += w;
     }
