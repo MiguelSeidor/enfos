@@ -34,6 +34,8 @@ import { CLIP_IDS, type ClipId } from './anim/clips';
 import { runtimeOf } from '@/gameplay/units';
 
 const SIM_STEP = 1 / 30;
+/** Clips that locomotion drives, and that must yield to an unfinished action. */
+const LOCOMOTION: ReadonlySet<ClipId> = new Set<ClipId>(['idle', 'walk', 'run']);
 /** Capacity per creep definition; the budget is 300 live units total. */
 const BATCH_CAPACITY = 400;
 
@@ -207,7 +209,31 @@ export class UnitViewModule implements GameModule {
     this.setClip(record, clip, fade ?? 0.18, true);
   }
 
+  /**
+   * Is this unit part way through an action it should be allowed to finish?
+   *
+   * Both presentation paths answer it their own way: a skinned view knows when
+   * its action is done, while an instanced one holds its last frame forever and
+   * has to be timed out against the clip's length.
+   */
+  private midOneShot(record: ViewRecord): boolean {
+    const clip = record.clip;
+    if (clip !== 'attack' && clip !== 'cast' && clip !== 'hit') return false;
+    if (record.view) return !record.view.animator.isFinished;
+    if (record.batch) return this.time - record.clipSetAt < record.batch.clipDuration(clip);
+    return false;
+  }
+
   private setClip(record: ViewRecord, clip: ClipId, fade: number, force: boolean): void {
+    // Locomotion never interrupts an action that has not finished. `movement`
+    // re-asserts idle/walk/run on EVERY simulation tick, with force set, which
+    // is harmless for a loop and lethal for a one-shot: combat would start an
+    // attack and the next tick would replace it 33 ms later, so the swing never
+    // played for more than a frame. It hid for as long as it did because the
+    // procedural hero animator ignores a re-play of a loop it is already
+    // running, so the stomping only ever showed on one-shots.
+    if (LOCOMOTION.has(clip) && this.midOneShot(record)) return;
+
     if (record.view) {
       // Animator ignores re-plays of looping clips on its own; one-shots
       // retrigger, which is what repeated attack commands want.
@@ -233,11 +259,7 @@ export class UnitViewModule implements GameModule {
       this.setClip(record, 'idle', 0.3, true);
       return;
     }
-    if (current === 'attack' || current === 'cast' || current === 'hit') {
-      if (record.view && !record.view.animator.isFinished) return;
-      // VAT one-shots hold their last frame; complete them by elapsed time.
-      if (record.batch && this.time - record.clipSetAt < record.batch.clipDuration(current)) return;
-    }
+    if (this.midOneShot(record)) return;
     const prof = record.def.profile;
     // The threshold is the walk speed itself, not the midpoint between walk
     // and run. An authored walk cycle covers real ground: measured on the orc,
