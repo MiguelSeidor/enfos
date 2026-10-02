@@ -55,8 +55,11 @@ const CLIP_SOURCES = {
   idle: { file: 'ork@idle1.fbx', trim: 'loop' },
   walk: { file: 'ork@walk.fbx', trim: 'loop' },
   run: { file: 'ork@run.fbx', trim: 'loop' },
-  // These files hold several swings back to back, so one burst is taken.
-  attack: { file: 'ork@atack1.fbx', trim: 'burst' },
+  // NOT atack1: that file holds about two seconds of the arms opening and then
+  // stays in a spread pose for the remaining seven, so the only burst in it is
+  // the arms flying apart. atack3 is a real cross-body swing and carries twice
+  // the movement of atack2.
+  attack: { file: 'ork@atack3.fbx', trim: 'burst' },
   cast: { file: 'ork@roar.fbx', trim: 'burst' },
   hit: { file: 'ork@gethit.fbx', trim: 'burst' },
   // A death is not a burst: the body falls once and then stays down, so the
