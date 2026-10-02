@@ -65,11 +65,15 @@ const CLIP_SOURCES = {
   // energy peak lands on the arms opening at the end of the spin, and the
   // span rule takes the whole padded file. 0 to 1.2 s is the spin, and it
   // happens to be the 1.18 s a cleaver has between blows.
-  // Played faster than it was animated. The turn is authored at a cinematic
-  // pace and at 1.17 s it reads as a pirouette rather than a strike; 1.45x
-  // brings it to 0.81 s, which is still inside the 1.18 s between blows and
-  // leaves a moment of locomotion in between.
-  attack: { file: 'ork@atack1.fbx', trim: 'window', window: [0, 1.2], speed: 1.45 },
+  // Played much faster than it was animated. The turn is authored at a
+  // cinematic pace: 1.17 s for a full circle reads as a pirouette rather than
+  // a strike. 1.95x brings it to 0.60 s.
+  //
+  // This is the only knob for how fast the SWING looks. How long the orc waits
+  // between swings is attackSpeed in gameplay/defs.ts, which is balance, and
+  // the two are easy to confuse when watching: a 0.60 s spin on a cleaver that
+  // attacks every 1.43 s spends more than half its time standing still.
+  attack: { file: 'ork@atack1.fbx', trim: 'window', window: [0, 1.2], speed: 1.95 },
   cast: { file: 'ork@roar.fbx', trim: 'burst' },
   hit: { file: 'ork@gethit.fbx', trim: 'burst' },
   // A death is not a burst: the body falls once and then stays down, so the
