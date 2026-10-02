@@ -65,7 +65,11 @@ const CLIP_SOURCES = {
   // energy peak lands on the arms opening at the end of the spin, and the
   // span rule takes the whole padded file. 0 to 1.2 s is the spin, and it
   // happens to be the 1.18 s a cleaver has between blows.
-  attack: { file: 'ork@atack1.fbx', trim: 'window', window: [0, 1.2] },
+  // Played faster than it was animated. The turn is authored at a cinematic
+  // pace and at 1.17 s it reads as a pirouette rather than a strike; 1.45x
+  // brings it to 0.81 s, which is still inside the 1.18 s between blows and
+  // leaves a moment of locomotion in between.
+  attack: { file: 'ork@atack1.fbx', trim: 'window', window: [0, 1.2], speed: 1.45 },
   cast: { file: 'ork@roar.fbx', trim: 'burst' },
   hit: { file: 'ork@gethit.fbx', trim: 'burst' },
   // A death is not a burst: the body falls once and then stays down, so the
@@ -404,7 +408,7 @@ const inPage = async (clipSources) => {
     return [(lo / STEPS) * clip.duration, (hi / STEPS) * clip.duration];
   };
 
-  const windowClip = (clip, id, span) => {
+  const windowClip = (clip, id, span, speed = 1) => {
     const tracks = [];
     for (const track of clip.tracks) {
       const size = track.getValueSize();
@@ -413,13 +417,13 @@ const inPage = async (clipSources) => {
       for (let i = 0; i < track.times.length; i++) {
         const t = track.times[i];
         if (t < span[0] - 1e-6 || t > span[1] + 1e-6) continue;
-        times.push(t - span[0]);
+        times.push((t - span[0]) / speed);
         for (let c = 0; c < size; c++) values.push(track.values[i * size + c]);
       }
       if (times.length < 2) continue;
       tracks.push(new track.constructor(track.name, times, values));
     }
-    return new THREE.AnimationClip(id, span[1] - span[0], tracks);
+    return new THREE.AnimationClip(id, (span[1] - span[0]) / speed, tracks);
   };
 
     const clips = [];
@@ -443,7 +447,7 @@ const inPage = async (clipSources) => {
     const whole = new THREE.AnimationClip(id, clip.duration, kept);
     let cut;
     if (source.trim === 'window') {
-      cut = windowClip(whole, id, source.window);
+      cut = windowClip(whole, id, source.window, source.speed ?? 1);
     } else if (source.trim === 'loop') {
       cut = trimClip(whole, id);
     } else {
@@ -455,7 +459,7 @@ const inPage = async (clipSources) => {
       if (span && source.maxSeconds && span[1] - span[0] > source.maxSeconds) {
         span[1] = span[0] + source.maxSeconds;
       }
-      cut = span ? windowClip(whole, id, span) : trimClip(whole, id);
+      cut = span ? windowClip(whole, id, span, source.speed ?? 1) : trimClip(whole, id);
     }
     clips.push(cut);
     clipInfo.push({ id, from: +clip.duration.toFixed(2), to: +cut.duration.toFixed(2), tracks: cut.tracks.length });
