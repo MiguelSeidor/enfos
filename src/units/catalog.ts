@@ -1964,7 +1964,12 @@ const spinebolt: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7. Huargo — fast creep (QUADRUPED)
+// 7. Devorador — fast creep (QUADRUPED)
+//
+// This procedural build is now a FALLBACK ONLY. The creature ships as an
+// authored biped; see `creep.duskrunner` in AUTHORED_MANIFEST
+// (build/authoredCharacter.ts). What follows describes the quadruped that is
+// drawn when that file fails to load.
 //
 // SILHOUETTE HOOK: the only body in the game that is longer than it is tall.
 // Two metres of back from tail tip to muzzle, carried at 1.2 m, with the head
@@ -1993,7 +1998,7 @@ const WOLF_PALETTE: Palette = {
 
 const duskrunner: CharacterDef = {
   id: 'creep.duskrunner',
-  name: 'Huargo',
+  name: 'Devorador',
   kind: 'creep',
   archetype: 'fast',
   proportions: prop({

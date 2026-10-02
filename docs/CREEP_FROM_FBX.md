@@ -61,6 +61,43 @@ en el puño o al otro lado del mapa.
 Si los nombres de hueso no coinciden entre la malla y las animaciones, hay que
 retargetear y eso es otro trabajo. Comprobarlo **antes** de empezar.
 
+### Antes de descargar: cómo saber si un pack sirve
+
+La mayoría de modelos a la venta son **estáticos**. Sirven para una ilustración
+y no para un juego, y nada en la ficha lo dice a gritos. Lo que hay que buscar:
+
+**Señales de que SÍ sirve**
+
+- La ficha dice **rigged** y **animated**, las dos cosas. "Rigged" a secas
+  significa que tiene huesos pero puede no tener ni un clip.
+- Enumera los clips por nombre: *idle, walk, run, attack, death*. Si no los
+  lista, dar por hecho que no están.
+- Trae **un fichero por animación** (`bicho@walk.fbx`, `bicho@attack.fbx`) o un
+  FBX único del que la ficha diga cuántas animaciones contiene.
+- Hay un vídeo o un GIF del modelo moviéndose. Un render fijo no prueba nada.
+
+**Señales de que NO sirve**
+
+- Solo OBJ, STL o USD. **El OBJ no puede llevar esqueleto, nunca.**
+- "High poly", "for 3D printing", "VFX ready", "subdivision ready".
+- Cientos de miles de triángulos. Un modelo de juego no pasa de unos pocos
+  miles; uno de medio millón está hecho para renderizar quieto.
+- El pack trae `.max` o `.blend` y la ficha promete el rig "en el fichero de la
+  escena". Un `.max` puede tener huesos sueltos sin piel y sin animar, que es lo
+  mismo que no tener nada, y no se puede verificar sin el programa.
+
+**Comprobación rápida de un pack ya descargado**, antes de invertir una hora:
+cargar el FBX y mirar tres números. Huesos, mallas con piel y animaciones. Si
+cualquiera de los tres es cero, el pack no sirve y no hay nada que negociar.
+
+Dos ejemplos reales, los dos rechazados en el primer minuto con esta
+comprobación: un arquero de 589.953 triángulos, 0 huesos y 0 animaciones (y
+557.808 de esos triángulos eran solo el pelo), y una araña de 18.170 triángulos,
+0 huesos y 0 animaciones. Su `.blend` tampoco tenía armadura: las palabras
+`Armature` y `Bone` que aparecen dentro de un `.blend` son nombres de
+estructuras internas que Blender escribe en todos sus ficheros, y no prueban
+nada.
+
 ## 2. Preparar el material
 
 ```bash
@@ -113,12 +150,32 @@ segundos de cada nueve.
 
 ## 4. Ejecutar
 
+Cada criatura es una entrada en `CHARACTERS`, dentro de la propia herramienta:
+qué fichero es la malla base, qué textura va con cada material y dónde se
+coloca en el atlas, cuántos triángulos puede gastar cada material, y el mapa de
+clips. Añadir una criatura es añadir una entrada.
+
 ```bash
-node tools/fbx-to-creep.mjs
+node tools/fbx-to-creep.mjs orc
+node tools/fbx-to-creep.mjs mutant
 ```
 
 Luego dar de alta la criatura en `AUTHORED_MANIFEST`
-(`src/units/build/authoredCharacter.ts`) con su altura en metros.
+(`src/units/build/authoredCharacter.ts`) con su altura en metros, y apuntar ahí
+el **id de personaje** del creep al que sustituye. Ojo: varios creeps pueden
+compartir arte. En este juego `wraith` y `prowler` usan los dos
+`creep.stalker`, y `bastion` y `breaker` usan `creep.bastion`, así que cambiar
+uno cambia el otro. El `wraith` además **vuela**, de modo que ponerle un bicho
+con ciclo de marcha lo dejaría andando por el aire.
+
+### Comprobación previa de un pack
+
+```bash
+node tools/fbx-check.mjs <fichero.fbx|.glb> [más ficheros]
+```
+
+Imprime huesos, mallas con piel y animaciones, y dice si sirve. Diez segundos
+frente a la hora que cuesta descubrirlo a mano.
 
 ## 5. Verificación obligatoria antes de commitear
 

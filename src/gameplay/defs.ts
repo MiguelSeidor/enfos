@@ -115,7 +115,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   },
   duskrunner: {
     characterId: 'creep.duskrunner',
-    name: 'Huargo',
+    name: 'Devorador',
     behavior: 'hunter',
     stats: stats({
       maxHealth: 120,

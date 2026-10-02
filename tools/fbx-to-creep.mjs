@@ -48,42 +48,101 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const PAGE = 'http://127.0.0.1:5173/play/';
-const OUT = 'public/models/orc.glb';
+/**
+ * Every creature this converter knows how to build.
+ *
+ * `base` and the clip files are names inside public/_src; `atlas` says which
+ * texture belongs to which material and where it lands, so a character with a
+ * single material gets a single image and one with several gets them packed
+ * side by side. `budget` is triangles per material after decimation.
+ */
+const CHARACTERS = {
+  orc: {
+    out: 'public/models/orc.glb',
+    base: 'base.fbx',
+    atlas: {
+      width: 2048,
+      height: 1024,
+      parts: [
+        { material: 'lambert1', file: 'ork.tga', x: 0, y: 0, w: 1024, h: 1024 },
+        { material: 'lambert2', file: 'axe.tga', x: 1024, y: 0, w: 512, h: 512 },
+      ],
+    },
+    budget: { lambert1: 2600, lambert2: 1000 },
+    // Named so the conversion fails loudly if the axes ever stop surviving it
+    // again, checked against the FINAL skeleton rather than the numbering
+    // before the bone reduction renumbers every slot.
+    verifyBones: ['ork_right_axe_1', 'ork_left_axe_1'],
+    clips: {
+    idle: { file: 'ork@idle1.fbx', trim: 'loop' },
+    walk: { file: 'ork@walk.fbx', trim: 'loop' },
+    run: { file: 'ork@run.fbx', trim: 'loop' },
+    // atack1 is the spinning attack: the torso turns a full 360 degrees between
+    // 0.15 s and 1.07 s and then holds the end pose for the remaining eight
+    // seconds. Sampling it once a second makes it look like a character standing
+    // with its arms out, which is how it got rejected twice; measuring the yaw
+    // is what found it.
+    //
+    // The window is given by hand because no automatic rule gets it right. The
+    // energy peak lands on the arms opening at the end of the spin, and the
+    // span rule takes the whole padded file. 0 to 1.2 s is the spin, and it
+    // happens to be the 1.18 s a cleaver has between blows.
+    // Played at nearly four times the pace it was animated at. The turn is
+    // authored for a cutscene -- 1.17 s for a full circle -- and every step down
+    // from there still read as a pirouette to the person watching it: 0.80 s was
+    // too slow, 0.60 s was too slow. 3.9x puts the whole spin in 0.30 s, which is
+    // a whirl rather than a dance.
+    //
+    // This is the only knob for how fast the SWING looks. How long the orc waits
+    // between swings is attackSpeed in gameplay/defs.ts, which is balance. The
+    // two are easy to confuse when watching, because a short spin on a slow
+    // cadence leaves the orc standing still for most of its cycle.
+    attack: { file: 'ork@atack1.fbx', trim: 'window', window: [0, 1.2], speed: 3.9 },
+    cast: { file: 'ork@roar.fbx', trim: 'burst' },
+    hit: { file: 'ork@gethit.fbx', trim: 'burst' },
+    // A death is not a burst: the body falls once and then stays down, so the
+    // cut runs from the first movement to the last rather than around a peak.
+    death: { file: 'ork@death.fbx', trim: 'span' },
 
-/** Source file -> the clip id this project animates with. */
-const CLIP_SOURCES = {
-  idle: { file: 'ork@idle1.fbx', trim: 'loop' },
-  walk: { file: 'ork@walk.fbx', trim: 'loop' },
-  run: { file: 'ork@run.fbx', trim: 'loop' },
-  // atack1 is the spinning attack: the torso turns a full 360 degrees between
-  // 0.15 s and 1.07 s and then holds the end pose for the remaining eight
-  // seconds. Sampling it once a second makes it look like a character standing
-  // with its arms out, which is how it got rejected twice; measuring the yaw
-  // is what found it.
-  //
-  // The window is given by hand because no automatic rule gets it right. The
-  // energy peak lands on the arms opening at the end of the spin, and the
-  // span rule takes the whole padded file. 0 to 1.2 s is the spin, and it
-  // happens to be the 1.18 s a cleaver has between blows.
-  // Played at nearly four times the pace it was animated at. The turn is
-  // authored for a cutscene -- 1.17 s for a full circle -- and every step down
-  // from there still read as a pirouette to the person watching it: 0.80 s was
-  // too slow, 0.60 s was too slow. 3.9x puts the whole spin in 0.30 s, which is
-  // a whirl rather than a dance.
-  //
-  // This is the only knob for how fast the SWING looks. How long the orc waits
-  // between swings is attackSpeed in gameplay/defs.ts, which is balance. The
-  // two are easy to confuse when watching, because a short spin on a slow
-  // cadence leaves the orc standing still for most of its cycle.
-  attack: { file: 'ork@atack1.fbx', trim: 'window', window: [0, 1.2], speed: 3.9 },
-  cast: { file: 'ork@roar.fbx', trim: 'burst' },
-  hit: { file: 'ork@gethit.fbx', trim: 'burst' },
-  // A death is not a burst: the body falls once and then stays down, so the
-  // cut runs from the first movement to the last rather than around a peak.
-  death: { file: 'ork@death.fbx', trim: 'span' },
+    },
+  },
+
+  mutant: {
+    out: 'public/models/mutant.glb',
+    base: 'base_mesh.fbx',
+    // One material over the whole creature and UVs inside 0..1, so the atlas is
+    // just the texture.
+    atlas: {
+      width: 1024,
+      height: 1024,
+      parts: [{ material: 'blinn1', file: 'mutant.png', x: 0, y: 0, w: 1024, h: 1024 }],
+    },
+    budget: { blinn1: 3400 },
+    clips: {
+      idle: { file: 'mutant01@idle01.fbx', trim: 'loop' },
+      walk: { file: 'mutant01@walk.fbx', trim: 'loop' },
+      run: { file: 'mutant01@Run01.fbx', trim: 'loop' },
+      // attack02 over attack01: half the length for the same lunge.
+      attack: { file: 'mutant01@attack02.fbx', trim: 'burst', maxSeconds: 1.1 },
+      cast: { file: 'mutant01@Rage_01.fbx', trim: 'burst', maxSeconds: 1.4 },
+      // gethit declares a duration of 226,081 seconds, which is nonsense the
+      // file shipped with. An explicit window ignores what it claims and takes
+      // the first second, which is where the flinch is.
+      hit: { file: 'mutant01@gethit.fbx', trim: 'window', window: [0, 1] },
+      death: { file: 'mutant01@death01.fbx', trim: 'span' },
+    },
+  },
 };
 
-const inPage = async (clipSources) => {
+const NAME = process.argv[2] ?? 'orc';
+const CHARACTER = CHARACTERS[NAME];
+if (!CHARACTER) {
+  console.error(`unknown character "${NAME}"; known: ${Object.keys(CHARACTERS).join(', ')}`);
+  process.exit(2);
+}
+const OUT = CHARACTER.out;
+const inPage = async (character) => {
+  const clipSources = character.clips;
   const THREE = await import('/node_modules/three/build/three.module.js');
   const { FBXLoader } = await import('/node_modules/three/examples/jsm/loaders/FBXLoader.js');
   const { GLTFExporter } = await import('/node_modules/three/examples/jsm/exporters/GLTFExporter.js');
@@ -93,7 +152,7 @@ const inPage = async (clipSources) => {
   const say = (k, v) => report.steps.push(`${k}: ${v}`);
 
   // ── 1. The base mesh, and the one skeleton everything will answer to ───────
-  const base = await new FBXLoader().loadAsync('/_src/base.fbx');
+  const base = await new FBXLoader().loadAsync('/_src/' + character.base);
   base.updateMatrixWorld(true);
 
   const parts = [];
@@ -198,70 +257,72 @@ const inPage = async (clipSources) => {
 
   // ── 3. Textures ───────────────────────────────────────────────────────────
   const tga = new TGALoader();
+  const plain = new THREE.TextureLoader();
   const shrink = async (url, size) => {
-    const tex = await tga.loadAsync(url);
+    // TGA arrives as raw rows bottom-up and has to be drawn flipped; a PNG
+    // arrives as an image the canvas already orients correctly. Treating both
+    // the same turns one of them upside down.
+    const isTga = /.tga$/i.test(url);
+    const tex = isTga ? await tga.loadAsync(url) : await plain.loadAsync(url);
     const src = tex.image;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d');
-    const tmp = document.createElement('canvas');
-    tmp.width = src.width; tmp.height = src.height;
-    tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(src.data), src.width, src.height), 0, 0);
-    ctx.save();
-    // TGA rows arrive bottom-up relative to what three expects here.
-    ctx.scale(1, -1);
-    ctx.drawImage(tmp, 0, -size, size, size);
-    ctx.restore();
+    if (isTga) {
+      const tmp = document.createElement('canvas');
+      tmp.width = src.width; tmp.height = src.height;
+      tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(src.data), src.width, src.height), 0, 0);
+      ctx.save();
+      ctx.scale(1, -1);
+      ctx.drawImage(tmp, 0, -size, size, size);
+      ctx.restore();
+    } else {
+      ctx.drawImage(src, 0, 0, size, size);
+    }
     const out = new THREE.CanvasTexture(canvas);
     out.colorSpace = THREE.SRGBColorSpace;
     out.flipY = false;
     return { texture: out, from: [src.width, src.height] };
   };
-  const bodyTex = await shrink('/_src/tex/ork.tga', 1024);
-  const axeTex = await shrink('/_src/tex/axe.tga', 512);
-
-  // One atlas, not two materials. Two materials mean two draw groups, and the
-  // exporter writes a draw group as its own glTF mesh with its own full copy of
-  // the vertex buffer: 3,553 vertices became 7,106, skinned twice per frame,
-  // for two draw calls per orc. Packing the body into the left half and the
-  // axes into the right collapses that back to one mesh, one material and one
-  // skinning pass, and the UVs just scale into their half.
+  // Pack whatever textures the character declares into one image. A creature
+  // with a single material gets its texture copied straight in; one with
+  // several gets them side by side and its UVs scaled into their own
+  // rectangle. Either way the character ships as ONE mesh with ONE material,
+  // because the exporter writes every extra draw group as its own glTF mesh
+  // carrying a full copy of the vertex buffer.
   const atlas = document.createElement('canvas');
-  atlas.width = 2048;
-  atlas.height = 1024;
+  atlas.width = character.atlas.width;
+  atlas.height = character.atlas.height;
   const actx = atlas.getContext('2d');
-  const RECT = {
-    lambert1: { x: 0, y: 0, w: 1024, h: 1024 },
-    lambert2: { x: 1024, y: 0, w: 512, h: 512 },
-  };
-  actx.drawImage(bodyTex.texture.image, RECT.lambert1.x, RECT.lambert1.y, RECT.lambert1.w, RECT.lambert1.h);
-  actx.drawImage(axeTex.texture.image, RECT.lambert2.x, RECT.lambert2.y, RECT.lambert2.w, RECT.lambert2.h);
+  const RECT = {};
+  const loadedFrom = [];
+  for (const part of character.atlas.parts) {
+    const img = await shrink('/_src/tex/' + part.file, Math.max(part.w, part.h));
+    actx.drawImage(img.texture.image, part.x, part.y, part.w, part.h);
+    RECT[part.material] = part;
+    loadedFrom.push(part.file + ' ' + img.from.join('x') + '->' + part.w);
+  }
   const atlasTexture = new THREE.CanvasTexture(atlas);
   atlasTexture.colorSpace = THREE.SRGBColorSpace;
   atlasTexture.flipY = false;
-  say('textures', `body ${bodyTex.from.join('x')}->1024 + axe ${axeTex.from.join('x')}->512, packed into one 2048x1024 atlas`);
+  say('textures', loadedFrom.join(', ') + '  into ' + atlas.width + 'x' + atlas.height);
 
   let uvCursor = 0;
   for (const [name, chunks] of byMaterial) {
-    const r = RECT[name] ?? RECT.lambert1;
-    for (const c of chunks) {
-      for (let i = 0; i < c.count; i++) {
+    const r = RECT[name] ?? character.atlas.parts[0];
+    for (const chunk of chunks) {
+      for (let i = 0; i < chunk.count; i++) {
         const at = (uvCursor + i) * 2;
         uvs[at] = (r.x + uvs[at] * r.w) / atlas.width;
         uvs[at + 1] = (r.y + uvs[at + 1] * r.h) / atlas.height;
       }
-      uvCursor += c.count;
+      uvCursor += chunk.count;
     }
   }
   geometry.getAttribute('uv').needsUpdate = true;
 
   const materials = [
-    new THREE.MeshStandardMaterial({
-      name: 'orc',
-      map: atlasTexture,
-      roughness: 0.85,
-      metalness: 0.0,
-    }),
+    new THREE.MeshStandardMaterial({ name: 'creature', map: atlasTexture, roughness: 0.85, metalness: 0.0 }),
   ];
 
   // ── 4. The skinned mesh ───────────────────────────────────────────────────
@@ -522,7 +583,7 @@ const inPage = async (clipSources) => {
   // Budgets are per group rather than global so the axes, which are a fifth of
   // the triangles and most of the silhouette, do not get optimised away in
   // favour of folds in a kilt.
-  const BUDGET = { lambert1: 2600, lambert2: 1000 };
+  const BUDGET = character.budget;
   const finalIndex = [];
   const finalGroups = [];
   for (let gi = 0; gi < groups.length; gi++) {
@@ -675,7 +736,7 @@ const inPage = async (clipSources) => {
   // checking the old numbering is how a passing test can mean nothing.
   const finalSlot = new Map(mesh.skeleton.bones.map((b, i) => [b.name, i]));
   const check = {};
-  for (const bn of ['ork_right_axe_1', 'ork_left_axe_1']) {
+  for (const bn of character.verifyBones ?? []) {
     const slot = finalSlot.get(bn);
     if (slot === undefined) { check[bn] = 'MISSING'; continue; }
     let n = 0;
@@ -759,7 +820,7 @@ const main = async () => {
   await page.goto(PAGE, { waitUntil: 'load' });
   await new Promise((r) => setTimeout(r, 5000));
 
-  const report = await page.evaluate(inPage, CLIP_SOURCES);
+  const report = await page.evaluate(inPage, CHARACTER);
   for (const line of report.steps) console.log('  ' + line);
   console.log('  axeVertices:', JSON.stringify(report.axeVertices));
 
@@ -777,4 +838,4 @@ main().catch((e) => {
   process.exit(1);
 });
 
-export { CLIP_SOURCES };
+export { CHARACTERS };
