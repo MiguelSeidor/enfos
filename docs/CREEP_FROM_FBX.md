@@ -136,7 +136,15 @@ fallo que llegó al juego.
 4. **Mirar las imágenes.** Si en la captura hay un hueco entre la mano y el
    arma, hay un hueco, por mucho que un número diga lo contrario.
 5. **Arrancar una partida real** desde el menú y mirar la criatura en el campo.
-6. **El movimiento solo lo puede juzgar una persona.** El arnés headless no
+6. **Medir el giro del clip ya exportado**, no el del FBX de origen. Son dos
+   cosas distintas y la conversión puede perderlo entero. Dos métricas
+   independientes que no degeneran: el eje derecho de las caderas proyectado al
+   suelo, y el ángulo de la mano (o del arma) orbitando alrededor de las
+   caderas. **No usar la línea de hombros**: con los brazos abiertos su
+   proyección al suelo se acerca a cero y el ángulo acumula vueltas que no
+   existen. El conversor imprime `structuralBones`; si sale vacío en un
+   humanoide, se ha descartado la raíz y el bicho no girará.
+7. **El movimiento solo lo puede juzgar una persona.** El arnés headless no
    mueve el bucle de render: entre capturas los huesos están congelados, así que
    cualquier medición de animación tomada por ahí no vale. Ver
    `qa/REVIEW_RUBRIC.md` para el listón visual.
@@ -153,6 +161,8 @@ fallo que llegó al juego.
 | Parpadea al atacar | Un `crossFade` de una acción **consigo misma**: programa fundido de salida y de entrada sobre el mismo peso y lo deja en cero |
 | Tirones con pocas criaturas | Jerarquía inflada. El FBX deja **una cadena de nodos vacíos delante de cada hueso**; el orco llegaba con 5.684 nodos para 139 huesos |
 | Texturas descolocadas al unir materiales | El exportador escribe cada grupo de dibujo como una malla glTF propia **con copia entera del buffer de vértices**. Mejor un atlas y un solo material |
+| Mueve los miembros pero **no gira el cuerpo** | Se ha descartado un hueso **estructural**. En este rig `ork_Hips` no mueve ni un vértice (la pelvis está pesada a la columna y a los muslos) pero es la raíz de la que cuelga todo, y el ataque entero es una rotación suya de 360°. Una regla de "conservar huesos con N vértices o más" lo tira. Hay que conservar además **todo ascendiente de un hueso conservado**, aunque no mueva nada |
+| Se pierden ascendientes al podar el esqueleto | Recorrer la jerarquía **por identidad de objeto** falla: con varios esqueletos el mismo hueso llega como instancias distintas, y entre hueso y hueso hay cuarenta envoltorios. Recorrer **por nombre** y no detenerse en el primer nodo que no sea hueso |
 
 ## 7. Presupuesto
 

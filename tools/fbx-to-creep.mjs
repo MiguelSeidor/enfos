@@ -55,17 +55,17 @@ const CLIP_SOURCES = {
   idle: { file: 'ork@idle1.fbx', trim: 'loop' },
   walk: { file: 'ork@walk.fbx', trim: 'loop' },
   run: { file: 'ork@run.fbx', trim: 'loop' },
-  // NOT atack1: that file holds about two seconds of the arms opening and then
-  // stays in a spread pose for the remaining seven, so the only burst in it is
-  // the arms flying apart.
+  // atack1 is the spinning attack: the torso turns a full 360 degrees between
+  // 0.15 s and 1.07 s and then holds the end pose for the remaining eight
+  // seconds. Sampling it once a second makes it look like a character standing
+  // with its arms out, which is how it got rejected twice; measuring the yaw
+  // is what found it.
   //
-  // atack2 over atack3 even though atack3 carries more movement. atack3 does
-  // its turn in 0.2 s, which at this camera is a flicker nobody can follow;
-  // atack2 spends 1.7 s raising the axe overhead, sweeping it down across the
-  // body and landing, so each phase lasts long enough to read. maxSeconds
-  // trims the settle afterwards so the whole swing fits inside the 1.18 s a
-  // cleaver has between attacks.
-  attack: { file: 'ork@atack2.fbx', trim: 'burst', maxSeconds: 1.2 },
+  // The window is given by hand because no automatic rule gets it right. The
+  // energy peak lands on the arms opening at the end of the spin, and the
+  // span rule takes the whole padded file. 0 to 1.2 s is the spin, and it
+  // happens to be the 1.18 s a cleaver has between blows.
+  attack: { file: 'ork@atack1.fbx', trim: 'window', window: [0, 1.2] },
   cast: { file: 'ork@roar.fbx', trim: 'burst' },
   hit: { file: 'ork@gethit.fbx', trim: 'burst' },
   // A death is not a burst: the body falls once and then stays down, so the
@@ -442,7 +442,9 @@ const inPage = async (clipSources) => {
     }
     const whole = new THREE.AnimationClip(id, clip.duration, kept);
     let cut;
-    if (source.trim === 'loop') {
+    if (source.trim === 'window') {
+      cut = windowClip(whole, id, source.window);
+    } else if (source.trim === 'loop') {
       cut = trimClip(whole, id);
     } else {
       let animated = null;
@@ -574,18 +576,34 @@ const inPage = async (clipSources) => {
         if (outSkinWeight.getComponent(v, k) > 0.05) drives[outSkinIndex.getComponent(v, k)]++;
       }
     }
-    const boneSet = new Set(bones);
-    const keep = new Set();
+    // Ancestors are collected BY NAME, not by object identity. With 49 source
+    // skeletons the same bone can arrive as more than one node instance, so an
+    // identity walk up the tree quietly fails to recognise its own ancestors.
+    //
+    // And a bone is kept for being an ancestor even when it drives nothing at
+    // all. ork_Hips drives exactly zero vertices here, because this rig skins
+    // the pelvis to the spine and the thighs and uses the hips purely as the
+    // root everything hangs from. Dropping it for having no vertices threw away
+    // the rotation of the entire body, which is how an attack whose whole
+    // content is a 360 degree turn arrived in the game as a character waving
+    // its arms.
+    const keptNames = new Set();
     for (let i = 0; i < bones.length; i++) {
       if (drives[i] < KEEP_AT) continue;
-      for (let n = bones[i]; n && boneSet.has(n); n = n.parent) keep.add(n);
+      keptNames.add(bones[i].name);
+      for (let n = bones[i].parent; n; n = n.parent) {
+        if (slotOf.has(n.name)) keptNames.add(n.name);
+      }
     }
+    const keep = new Set(bones.filter((b) => keptNames.has(b.name)));
     const kept = bones.filter((b) => keep.has(b));
     const newSlot = new Map(kept.map((b, i) => [b, i]));
     const redirect = new Int32Array(bones.length);
     for (let i = 0; i < bones.length; i++) {
       let n = bones[i];
-      while (n && !keep.has(n) && boneSet.has(n)) n = n.parent;
+      // Same reasoning as above: walk by name, and keep walking past anything
+      // that is not a bone rather than giving up on it.
+      while (n && !keptNames.has(n.name)) n = n.parent;
       redirect[i] = n && newSlot.has(n) ? newSlot.get(n) : 0;
     }
 
@@ -632,6 +650,12 @@ const inPage = async (clipSources) => {
     let left = 0;
     root.traverse(() => left++);
     say('bones', `${bones.length} -> ${kept.length}, nodes now ${left}`);
+    // Bones kept purely for holding the body together carry rotation that no
+    // vertex count can reveal, so they are reported: if the list is empty on a
+    // humanoid, the ancestor rule has stopped working and the character will
+    // animate limbs while refusing to turn.
+    const structural = kept.filter((b2) => drives[bones.indexOf(b2)] === 0).map((b2) => b2.name);
+    say('structuralBones', structural.length ? structural.join(', ') : 'NONE -- suspicious');
   }
 
   // ── 7. Did the axes survive all of that? ──────────────────────────────────
