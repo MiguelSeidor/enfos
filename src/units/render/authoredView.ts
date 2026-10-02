@@ -44,6 +44,10 @@ export class AuthoredView {
   private currentId: ClipId = 'idle';
   private remaining = 0;
   private readonly rootBone: THREE.Bone | null;
+  /** Metres per unit of the character, so clip travel can be read in metres. */
+  private readonly worldScale: number;
+  /** Metres per second each locomotion clip was authored for. */
+  private readonly paceOf = new Map<ClipId, number>();
   private readonly rootRest = new THREE.Vector3();
 
   constructor(source: AuthoredCharacter, scale = 1, phase = 0) {
@@ -88,8 +92,31 @@ export class AuthoredView {
     // death is supposed to drop.
     const bones = (mesh as THREE.SkinnedMesh | null)?.skeleton.bones ?? [];
     const boneSet = new Set<THREE.Object3D>(bones);
-    this.rootBone = bones.find((b) => !b.parent || !boneSet.has(b.parent)) ?? bones[0] ?? null;
+    const topBone = bones.find((b) => !b.parent || !boneSet.has(b.parent)) ?? bones[0] ?? null;
+
+    // Pin the node the clips actually TRANSLATE, which need not be a bone. A
+    // glTF written from a merged FBX can carry two nodes of the same name: the
+    // skeleton's bone, and above it the plain node the animation targets. Pin
+    // the bone and the root motion survives untouched on its parent, so the
+    // simulation moves the creature and the clip moves it again, and the feet
+    // never agree with the ground. That is what gliding looks like.
+    const translated = new Set<string>();
+    for (const clip of source.clips.values()) {
+      for (const t of clip.tracks) {
+        if (t.name.endsWith('.position')) translated.add(t.name.slice(0, -'.position'.length));
+      }
+    }
+    let pinned = topBone;
+    for (let n: THREE.Object3D | null = topBone; n && n !== root; n = n.parent) {
+      if (translated.has(n.name)) pinned = n as THREE.Bone;
+    }
+    this.rootBone = pinned;
     if (this.rootBone) this.rootRest.copy(this.rootBone.position);
+    this.worldScale = root.getWorldScale(new THREE.Vector3()).x * scale;
+    for (const id of ['walk', 'run'] as ClipId[]) {
+      const clip = source.clips.get(id);
+      if (clip) this.paceOf.set(id, this.authoredPace(clip));
+    }
 
     this.animator = { isFinished: true };
     this.play('idle', 0);
@@ -132,19 +159,51 @@ export class AuthoredView {
   }
 
   /**
+   * How fast the ground moves under a locomotion clip played at its own pace,
+   * in metres per second, read from the clip rather than assumed.
+   *
+   * An authored walk covers real ground: the root travels forward and the feet
+   * are planted to match. Play it faster than that and the feet skate; slower
+   * and they drag. The number is different for every character -- this orc's
+   * walk is built for 0.64 m/s and this archer's for 1.59 -- so a constant is
+   * wrong for all but the one it was measured on, and using the orc's on the
+   * archer drove her legs at the clamp while she glided.
+   *
+   * A clip exported "in place" has no travel to read. Those return 0 and the
+   * caller falls back, because dividing by nothing would pin the timescale to
+   * its ceiling.
+   */
+  private authoredPace(clip: THREE.AnimationClip): number {
+    if (!this.rootBone) return 0;
+    const track = clip.tracks.find(
+      (t) => t.name === `${this.rootBone!.name}.position`,
+    ) as THREE.VectorKeyframeTrack | undefined;
+    if (!track || clip.duration <= 0) return 0;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < track.times.length; i++) {
+      const x = track.values[i * 3]!;
+      const z = track.values[i * 3 + 2]!;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+    }
+    // Track values are in the character's own units; the group carries the
+    // scale that turns those into metres.
+    const span = Math.hypot(maxX - minX, maxZ - minZ) * this.worldScale;
+    return span / clip.duration;
+  }
+
+  /**
    * Plays locomotion at the pace the unit is actually travelling, so the feet
    * stay with the ground instead of skating over it.
    *
-   * The references are the speed each clip was authored for, derived from its
-   * own stride: on the orc the walk's feet separate by at most 0.78 m over a
-   * 2.42 s cycle of two steps, which is 0.64 m/s, and the run reaches 1.60 m
-   * for 1.32 m/s. These are close to universal for humanoid clips because they
-   * come from anatomy rather than from this file, but a creature with a very
-   * different gait will need its own numbers.
-   *
-   * The ceiling is deliberately high. A creep moving at 3.5 m/s needs its run
-   * driven at well over double speed, and a clamp that refuses is a clamp that
-   * chooses gliding.
+   * The ceiling is deliberately high. A creep moving at 3.5 m/s against a clip
+   * built for 1.3 needs it driven at well over double speed, and a clamp that
+   * refuses is a clamp that chooses gliding.
    */
   setSpeed(speed: number): void {
     if (!this.current) return;
@@ -152,8 +211,11 @@ export class AuthoredView {
       this.current.timeScale = 1;
       return;
     }
-    const authoredPace = this.currentId === 'walk' ? 0.64 : 1.32;
-    this.current.timeScale = THREE.MathUtils.clamp(speed / authoredPace, 0.6, 3.2);
+    // The fallbacks are the orc's, measured from its stride, and apply only to
+    // a character whose clips travel nowhere.
+    const measured = this.paceOf.get(this.currentId) ?? 0;
+    const pace = measured > 0.05 ? measured : this.currentId === 'walk' ? 0.64 : 1.32;
+    this.current.timeScale = THREE.MathUtils.clamp(speed / pace, 0.6, 3.2);
   }
 
   update(dt: number): void {
