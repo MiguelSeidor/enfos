@@ -109,14 +109,19 @@ const main = async () => {
       console.log(`  could not load: ${r.error}`);
       continue;
     }
-    const usable = r.bones > 0 && r.skinnedMeshes > 0 && r.animations > 0;
+    // A clip file exported "without skin" is a skeleton and a motion and no
+    // mesh, which is correct and not a failure. Judging it as if it had to be
+    // a whole creature reports every animation download as broken.
+    const animationOnly = r.bones > 0 && r.meshes === 0 && r.animations > 0;
+    const usable = animationOnly || (r.bones > 0 && r.skinnedMeshes > 0 && r.animations > 0);
     console.log(`  bones          ${r.bones}`);
     console.log(`  skinned meshes ${r.skinnedMeshes} of ${r.meshes}`);
     console.log(`  animations     ${r.animations}${r.clips.length ? '  ' + r.clips.join(', ') : ''}`);
     console.log(`  triangles      ${r.tris.toLocaleString()}   (budget is about 3,500)`);
     console.log(`  biggest meshes ${r.biggest.map((m) => `${m.name}:${m.tris.toLocaleString()}`).join(', ')}`);
     console.log(`  bounds         ${r.size.join(' x ')}`);
-    console.log(usable ? '  USABLE: has a skeleton, a bound mesh and clips.' : '  NOT USABLE as a creep: ' +
+    console.log(animationOnly ? '  ANIMATION FILE: a skeleton and a clip, no mesh. Correct for a clip download.'
+      : usable ? '  USABLE: has a skeleton, a bound mesh and clips.' : '  NOT USABLE as a creep: ' +
       [r.bones === 0 ? 'no skeleton' : null,
        r.skinnedMeshes === 0 ? 'no mesh bound to one' : null,
        r.animations === 0 ? 'no animations' : null].filter(Boolean).join(', ') + '.');

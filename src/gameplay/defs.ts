@@ -131,7 +131,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   },
   spinebolt: {
     characterId: 'creep.spinebolt',
-    name: 'Goblin ballestero',
+    name: 'Arquera',
     behavior: 'skirmisher',
     stats: stats({
       maxHealth: 105,

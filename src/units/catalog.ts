@@ -1697,7 +1697,10 @@ const cleaver: CharacterDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. Goblin ballestero — ranged creep
+// 6. Arquera — ranged creep
+//
+// This procedural build is a FALLBACK ONLY. The creature ships as authored art;
+// see `creep.spinebolt` in AUTHORED_MANIFEST (build/authoredCharacter.ts).
 //
 // SILHOUETTE HOOK: ears longer than its own head, held out sideways past the
 // shoulders, on a body two thirds the height of the orc's.
@@ -1717,7 +1720,7 @@ const GOBLIN_PALETTE: Palette = {
 
 const spinebolt: CharacterDef = {
   id: 'creep.spinebolt',
-  name: 'Goblin ballestero',
+  name: 'Arquera',
   kind: 'creep',
   archetype: 'ranged',
   proportions: prop({

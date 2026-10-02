@@ -107,6 +107,41 @@ const CHARACTERS = {
     },
   },
 
+  erika: {
+    out: 'public/models/erika.glb',
+    base: 'base.fbx',
+    // Mixamo embeds its textures in the FBX, so there are no files to name:
+    // the converter takes each material's own map and lays them out itself.
+    // 1024 across six cells. The body lands at 341x512, which is more than a
+    // creature 79 pixels tall can show, and keeps the file near a megabyte.
+    atlas: { embedded: true, size: 1024 },
+    // Explicit per material, NOT a single number shared out in proportion.
+    // Proportional allocation starves exactly what matters: the bow is 400 of
+    // 21,004 triangles, so it was given 100, and a long thin object at 100
+    // triangles collapses into slivers that lance through the character. The
+    // eyelashes, meanwhile, are the densest mesh in the file and invisible at
+    // 79 pixels. The bow and arrow keep every triangle they came with.
+    budget: {
+      Body_MAT1: 1700,   // body and head
+      Akai_MAT1: 1000,   // clothing
+      Bow_MAT: 400,      // the bow, untouched
+      Arrow_MAT: 80,     // the arrow, untouched
+      EyeSpec_MAT1: 100, // eyes, invisible at this distance
+      phong1: 100,
+    },
+    clips: {
+      idle: { file: 'idle.fbx', trim: 'loop' },
+      walk: { file: 'walk.fbx', trim: 'loop' },
+      run: { file: 'run.fbx', trim: 'loop' },
+      // Five seconds of draw, hold and release. The ballestero shoots every
+      // 1.43 s, so the hold has to go: one burst around the release.
+      attack: { file: 'attack.fbx', trim: 'burst', maxSeconds: 1.2 },
+      cast: { file: 'attack.fbx', trim: 'burst', maxSeconds: 1.2 },
+      hit: { file: 'hit.fbx', trim: 'burst' },
+      death: { file: 'death.fbx', trim: 'span' },
+    },
+  },
+
   mutant: {
     out: 'public/models/mutant.glb',
     base: 'base_mesh.fbx',
@@ -284,23 +319,81 @@ const inPage = async (character) => {
     out.flipY = false;
     return { texture: out, from: [src.width, src.height] };
   };
-  // Pack whatever textures the character declares into one image. A creature
-  // with a single material gets its texture copied straight in; one with
-  // several gets them side by side and its UVs scaled into their own
-  // rectangle. Either way the character ships as ONE mesh with ONE material,
-  // because the exporter writes every extra draw group as its own glTF mesh
-  // carrying a full copy of the vertex buffer.
+  // Two ways to get textures. A pack that ships them as files names each one
+  // against a material; a Mixamo export carries them INSIDE the FBX, where
+  // three decodes them into ordinary images that load asynchronously -- read
+  // too early they are all blank, which looks exactly like a broken atlas.
   const atlas = document.createElement('canvas');
-  atlas.width = character.atlas.width;
-  atlas.height = character.atlas.height;
-  const actx = atlas.getContext('2d');
+  const actx = () => atlas.getContext('2d');
   const RECT = {};
   const loadedFrom = [];
-  for (const part of character.atlas.parts) {
-    const img = await shrink('/_src/tex/' + part.file, Math.max(part.w, part.h));
-    actx.drawImage(img.texture.image, part.x, part.y, part.w, part.h);
-    RECT[part.material] = part;
-    loadedFrom.push(part.file + ' ' + img.from.join('x') + '->' + part.w);
+  if (character.atlas.embedded) {
+    const used = [...byMaterial.keys()];
+    const sourceOf = new Map();
+    base.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const m of (Array.isArray(o.material) ? o.material : [o.material])) sourceOf.set(m.name, m);
+    });
+    // Wait until the pixels are actually there. An image's "complete" flag is
+    // not a sign of that: it reads true on one that has not started, so
+    // trusting it drew every cell of the atlas as the grey fallback and shipped
+    // a character with no texture at all. Width is the only honest test.
+    // Wait for the pixels in two stages, because both can be absent and they
+    // are absent for different reasons. The texture object exists from the
+    // moment the file is parsed, but three fills in its `image` later, so a
+    // check that gives up when the image is missing gives up every time. And
+    // once the image does appear, its "complete" flag reads true before it has
+    // any pixels. Width is the only honest test, and it has to be waited for.
+    //
+    // Getting this wrong is silent: every cell falls back to flat grey and the
+    // character ships with no texture.
+    await Promise.all(used.map(async (name) => {
+      const material = sourceOf.get(name);
+      if (!material || !material.map) return;
+      for (let waited = 0; !material.map.image && waited < 8000; waited += 100) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const img = material.map.image;
+      if (!img) return;
+      if (img.decode) {
+        try {
+          await img.decode();
+        } catch {
+          // Falls through to the poll below; a decode that throws is not fatal.
+        }
+      }
+      for (let waited = 0; !img.width && waited < 8000; waited += 100) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }));
+    const size = character.atlas.size ?? 2048;
+    const cols = Math.ceil(Math.sqrt(used.length));
+    const rows = Math.ceil(used.length / cols);
+    atlas.width = size; atlas.height = size;
+    const cw = Math.floor(size / cols), ch = Math.floor(size / rows);
+    const ctx = actx();
+    used.forEach((name, i) => {
+      const rect = { x: (i % cols) * cw, y: Math.floor(i / cols) * ch, w: cw, h: ch };
+      RECT[name] = rect;
+      const m = sourceOf.get(name);
+      const img = m && m.map && m.map.image;
+      if (img && img.width) ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h);
+      else { ctx.fillStyle = '#808080'; ctx.fillRect(rect.x, rect.y, rect.w, rect.h); }
+      // Say WHICH link broke. "MISSING" on its own sent the last build out with
+      // a flat grey atlas and no clue where to look.
+      const why = !m ? 'no material' : !m.map ? 'no map' : !img ? 'no image' : !img.width ? 'zero width' : null;
+      loadedFrom.push(name + (why ? ' MISSING(' + why + ')' : ' ' + img.width + 'px'));
+    });
+  } else {
+    atlas.width = character.atlas.width;
+    atlas.height = character.atlas.height;
+    const ctx = actx();
+    for (const part of character.atlas.parts) {
+      const img = await shrink('/_src/tex/' + part.file, Math.max(part.w, part.h));
+      ctx.drawImage(img.texture.image, part.x, part.y, part.w, part.h);
+      RECT[part.material] = part;
+      loadedFrom.push(part.file + ' ' + img.from.join('x') + '->' + part.w);
+    }
   }
   const atlasTexture = new THREE.CanvasTexture(atlas);
   atlasTexture.colorSpace = THREE.SRGBColorSpace;
@@ -309,12 +402,14 @@ const inPage = async (character) => {
 
   let uvCursor = 0;
   for (const [name, chunks] of byMaterial) {
-    const r = RECT[name] ?? character.atlas.parts[0];
+    const r = RECT[name];
     for (const chunk of chunks) {
       for (let i = 0; i < chunk.count; i++) {
         const at = (uvCursor + i) * 2;
-        uvs[at] = (r.x + uvs[at] * r.w) / atlas.width;
-        uvs[at + 1] = (r.y + uvs[at + 1] * r.h) / atlas.height;
+        if (r) {
+          uvs[at] = (r.x + uvs[at] * r.w) / atlas.width;
+          uvs[at + 1] = (r.y + uvs[at + 1] * r.h) / atlas.height;
+        }
       }
       uvCursor += chunk.count;
     }
@@ -426,7 +521,13 @@ const inPage = async (character) => {
    * reports zero for them.
    */
   const burstWindow = (fbx, clip, skinned, wholeSpan) => {
-    const bones = skinned ? skinned.skeleton.bones : [];
+    // Bones by traversal, not through the mesh. An animation exported
+    // "without skin" -- which is how Mixamo and most clip libraries ship --
+    // has a skeleton and no mesh at all, so asking the mesh for its bones
+    // returns nothing and every burst trim silently degrades to the padding
+    // trim, leaving a five second attack at five seconds.
+    let bones = skinned ? skinned.skeleton.bones : [];
+    if (!bones.length) { const found = []; fbx.traverse((o) => { if (o.isBone) found.push(o); }); bones = found; }
     if (!bones.length) return null;
     const hips = bones.find((b) => /_Hips$/i.test(b.name)) ?? bones[0];
     const mixer = new THREE.AnimationMixer(fbx);
@@ -583,7 +684,15 @@ const inPage = async (character) => {
   // Budgets are per group rather than global so the axes, which are a fifth of
   // the triangles and most of the silhouette, do not get optimised away in
   // favour of folds in a kilt.
-  const BUDGET = character.budget;
+  // A number shares the whole budget out in proportion to what each material
+  // already covers, so a character with six materials does not need six
+  // numbers picked by hand.
+  let BUDGET = character.budget;
+  if (typeof BUDGET === 'number') {
+    const totalTris = groups.reduce((n, g) => n + g.count / 3, 0);
+    BUDGET = {};
+    for (const g of groups) BUDGET[g.name] = Math.max(60, Math.round((g.count / 3 / totalTris) * character.budget));
+  }
   const finalIndex = [];
   const finalGroups = [];
   for (let gi = 0; gi < groups.length; gi++) {
@@ -638,7 +747,13 @@ const inPage = async (character) => {
   // between them stopped existing. Nothing is left orphaned and no weight is
   // lost: the weights that land on the same bone are summed and renormalised.
   {
-    const KEEP_AT = 20;
+    // One vertex is enough to keep a bone. The old threshold of twenty was a
+    // performance idea that broke two characters in two different ways: it
+    // deleted the hips the orc rotates its whole attack on, and it mangled the
+    // archer's bow. Most of the saving was never in the bones anyway, it was
+    // in collapsing the node tree, which is untouched. A bone that drives
+    // nothing at all and holds nothing up still goes.
+    const KEEP_AT = character.keepBonesAbove ?? 1;
     const outSkinIndex = outGeometry.getAttribute('skinIndex');
     const outSkinWeight = outGeometry.getAttribute('skinWeight');
     const drives = new Array(bones.length).fill(0);
@@ -658,9 +773,15 @@ const inPage = async (character) => {
     // the rotation of the entire body, which is how an attack whose whole
     // content is a 360 degree turn arrived in the game as a character waving
     // its arms.
+    // The vertex count is the wrong test for the end of a limb. An ankle skins
+    // almost nothing and is the joint that makes a walk read; dropping it
+    // leaves a character gliding on stiff legs. These are kept whatever they
+    // drive, and the list is deliberately about locomotion and reach rather
+    // than about detail: no fingers, no jaw, no cloth.
+    const CORE = /(hips?|spined*$|spine$|neck|head$|shoulder|upperarm|upleg|thigh|(^|[^a-z])arm|forearm|hand$|leg$|calf|foot$|ankle|toebase|pelvis)/i;
     const keptNames = new Set();
     for (let i = 0; i < bones.length; i++) {
-      if (drives[i] < KEEP_AT) continue;
+      if (drives[i] < KEEP_AT && !CORE.test(bones[i].name)) continue;
       keptNames.add(bones[i].name);
       for (let n = bones[i].parent; n; n = n.parent) {
         if (slotOf.has(n.name)) keptNames.add(n.name);
