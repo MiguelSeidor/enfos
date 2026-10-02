@@ -8,6 +8,48 @@ Herramienta: `tools/fbx-to-creep.mjs`.
 
 ---
 
+## 0. Las dos reglas que están por encima del resto
+
+Las dos salieron de lo mismo: decidir en vez de comprobar. Ninguna de las
+trampas técnicas de este documento habría costado lo que costó si se hubieran
+respetado.
+
+### Hacer caso a lo que dice el dueño del proyecto
+
+Lo que él ve en el juego es el dato bueno. Si su descripción choca con mi
+lectura de una captura, **el que se equivoca soy yo** hasta que tenga una
+medición que demuestre otra cosa.
+
+Dijo dos veces que el orco llevaba dos hachas, una en cada mano. Las dos veces
+decidí, mirando un render gris de baja resolución, que eran garras del brazo.
+Sobre esa conclusión se construyeron cinco "arreglos" seguidos que movieron
+piezas sanas, borraron un arma y dejaron el personaje peor que al principio.
+El FBX de origen, abierto al fin, mostraba las dos hachas empuñadas.
+
+Discrepar está bien cuando hay evidencia. Decidir en silencio y seguir
+construyendo encima, no.
+
+### Mirar lo que hay de verdad en los ficheros antes de inventar
+
+Abrir el fichero y mirarlo. No deducir su contenido del nombre, de lo que suele
+traer un pack, ni de lo que tendría sentido que trajera.
+
+- El pack traía la respuesta a todo desde el primer día, en tres zips que el
+  dueño ya había descargado y había dicho que usara. Se tardó una semana en
+  abrirlos.
+- `ork@atack1.fbx` no contiene ningún ataque. El nombre decía que sí.
+- La malla base tenía **49 esqueletos**, cosa que nadie supondría y que
+  explicaba por sí sola meses de síntomas raros.
+- Las hachas venían atadas limpiamente a `ork_right_axe_1` y `ork_left_axe_1`.
+  No había que colocarlas: había que dejar de romperlas.
+
+Corolario: una medición que **no puede fallar** no es una verificación. Medir
+"vértices pesados al hueso de la mano" para saber si un arma está empuñada
+incluye los dedos del personaje y siempre dará un número pequeño, con el arma
+en el puño o al otro lado del mapa.
+
+---
+
 ## 1. Qué tiene que traer el pack
 
 | Pieza | Qué se espera |
@@ -45,9 +87,17 @@ renderizar ~10 poses repartidas por la duración del clip, con **un solo
 contexto WebGL** (crear un `WebGLRenderer` por celda agota el límite del
 navegador y deja las primeras en blanco, sin aviso).
 
-Al elegir, pensar en la cámara: el juego mira el campo **desde arriba**, así que
-un mandoble horizontal se lee y un hachazo vertical se escorza hasta
-desaparecer.
+Al elegir, pensar en la cámara y en el **tiempo**, que importa igual o más:
+
+- El juego mira el campo desde arriba, así que un movimiento que recorre el
+  plano del suelo se lee y uno que va de frente se escorza.
+- Un giro de torso de dos décimas de segundo no se aprecia a esta distancia.
+  Entre dos clips, gana el que reparte el movimiento en fases largas, aunque
+  tenga menos energía total. El `atack3` del orco tenía el doble de movimiento
+  que el `atack2` y se veía peor, porque lo gastaba todo en 0,2 s.
+- El clip no debe durar más que el hueco entre ataques (`1 / attackSpeed`), o su
+  final no lo ve nadie. Para el cleaver son 1,18 s. `maxSeconds` recorta la cola
+  de recuperación para que quepa.
 
 Luego mapear en `CLIP_SOURCES` dentro de la herramienta, con su modo de recorte:
 

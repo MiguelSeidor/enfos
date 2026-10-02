@@ -57,9 +57,15 @@ const CLIP_SOURCES = {
   run: { file: 'ork@run.fbx', trim: 'loop' },
   // NOT atack1: that file holds about two seconds of the arms opening and then
   // stays in a spread pose for the remaining seven, so the only burst in it is
-  // the arms flying apart. atack3 is a real cross-body swing and carries twice
-  // the movement of atack2.
-  attack: { file: 'ork@atack3.fbx', trim: 'burst' },
+  // the arms flying apart.
+  //
+  // atack2 over atack3 even though atack3 carries more movement. atack3 does
+  // its turn in 0.2 s, which at this camera is a flicker nobody can follow;
+  // atack2 spends 1.7 s raising the axe overhead, sweeping it down across the
+  // body and landing, so each phase lasts long enough to read. maxSeconds
+  // trims the settle afterwards so the whole swing fits inside the 1.18 s a
+  // cleaver has between attacks.
+  attack: { file: 'ork@atack2.fbx', trim: 'burst', maxSeconds: 1.2 },
   cast: { file: 'ork@roar.fbx', trim: 'burst' },
   hit: { file: 'ork@gethit.fbx', trim: 'burst' },
   // A death is not a burst: the body falls once and then stays down, so the
@@ -442,6 +448,11 @@ const inPage = async (clipSources) => {
       let animated = null;
       fbx.traverse((o) => { if (!animated && o.isSkinnedMesh) animated = o; });
       const span = burstWindow(fbx, clip, animated, source.trim === 'span');
+      // A clip longer than the gap between attacks is a clip whose end nobody
+      // ever sees, so the tail is cut here rather than mid-playback.
+      if (span && source.maxSeconds && span[1] - span[0] > source.maxSeconds) {
+        span[1] = span[0] + source.maxSeconds;
+      }
       cut = span ? windowClip(whole, id, span) : trimClip(whole, id);
     }
     clips.push(cut);
