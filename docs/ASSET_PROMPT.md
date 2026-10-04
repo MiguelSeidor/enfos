@@ -101,6 +101,28 @@ robes with pale bone-coloured trim. Serene, unsettling. Palette: muted violet,
 plum, cold bone white.
 ```
 
+### `portrait_talon.png`
+```
+[PREÁMBULO DE ARTE]
+Bust portrait, 3/4 view, shoulders up. A lean marksman: narrow upright
+silhouette, deep hood shadowing the upper face, a short cloak clasped at one
+shoulder and the opposite shoulder left bare for the draw. The upper limb of a
+tall recurve bow rises past the head on one side -- it must break the outline and
+be the one shape the portrait is read by. Watchful, still, about to loose.
+Palette: forest green, worn leather brown, pale gold, a faint mint green glow.
+```
+
+### `portrait_vesper.png`
+```
+[PREÁMBULO DE ARTE]
+Bust portrait, 3/4 view, shoulders up. A serene healer: the silhouette widens
+like a bell below the chest, and a thin unbroken ring of warm light floats
+horizontally above her head, not touching it. A shepherd's crook rests against
+one shoulder with a small lantern hanging from it. Hooded robe in bone white
+with warm brown and gold trim. Calm, radiant, maternal. Palette: bone white,
+warm brown, gold, warm cream glow.
+```
+
 ### `portrait_marrow_titan.png`
 ```
 [PREÁMBULO DE ARTE]
@@ -117,30 +139,177 @@ Menacing, ancient, top-heavy. Palette: bleached bone, ash grey, cold cyan glow.
 Formato: símbolo único, centrado, sin marco ni borde (el marco lo pone nuestra
 interfaz). Debe leerse a 40 px.
 
+**Hoy son SVG en línea** (`src/ui/icons.ts`): un trazo sobre rejilla 24×24 que usa
+`currentColor`, y de eso dependen el tinte dorado, el estado deshabilitado y el
+barrido de enfriamiento, que son CSS puro. Un PNG pintado no se puede tintar. No
+es bloqueante — el enfriamiento pasa a ser un filtro CSS sobre la imagen y el
+deshabilitado una desaturación — pero hay que hacerlo al integrarlos, no después.
+
 Plantilla:
 ```
 [PREÁMBULO DE ARTE]
 Single centred ability icon on transparent background. Bold simple symbol,
 readable when scaled down to 40 pixels. No frame, no border, no text.
+Flat 2D icon illustration, not a 3D render, not a photograph.
 Subject: <DESCRIPCIÓN>
 ```
 
-Sustituir `<DESCRIPCIÓN>` por, uno por icono:
+Son **16 iconos, uno por habilidad**. Hoy hay dos reutilizados que no deben
+seguir siéndolo: `spark` lo comparten Sello de éter y Luz punzante, y `unbroken`
+lo comparten Bastión inquebrantable y Alba.
 
-| Fichero | Descripción |
-| --- | --- |
-| `icon_shield_bash.png` | a heavy round shield struck head-on, radiating impact cracks, warm amber sparks |
-| `icon_anchor_shout.png` | a stylised open-mouthed roar as concentric sound arcs pushing outward, gold |
-| `icon_bulwark_wall.png` | interlocking stone blocks forming a defensive barrier, cool grey with a faint blue rim |
-| `icon_unbroken.png` | a sunburst breaking over a shield boss, radiant gold and white |
-| `icon_arcane_bolt.png` | a sharp violet arrow of arcane energy in flight, trailing sparks |
-| `icon_frost_chain.png` | jagged ice shards linked in a chain, pale cyan |
-| `icon_threshold_ward.png` | a protective bubble of layered runic rings, soft teal |
-| `icon_arcane_judgement.png` | a cataclysmic violet vortex seen from above, spiralling inward |
+### Bulwark, Guardián del Vado — acero azulado, gris metal, oro apagado
+
+| Fichero | Habilidad | Descripción |
+| --- | --- | --- |
+| `icon_bulwark_q.png` | Embate de escudo | a heavy round shield driven forward head-on, radiating impact cracks across its face, warm amber sparks at the rim |
+| `icon_bulwark_w.png` | Grito de anclaje | a visored helm front-on with mouth open, three concentric sound arcs pushing outward, a small heavy anchor forming the chin, muted gold |
+| `icon_bulwark_e.png` | Muro de contención | interlocking stone blocks forming a low barrier seen head-on, cool grey with a faint blue protective rim light along the top edge |
+| `icon_bulwark_r.png` | Bastión inquebrantable | a shield boss splitting open with a shockwave ring bursting outward and a warm restorative glow welling from the crack, radiant gold and white |
+
+### Oracle — violeta apagado, ciruela, blanco hueso frío
+
+Los cuatro de esta sección estaban descritos en una versión anterior del doc y
+**ya no correspondían a las habilidades**: se rediseñaron después. Estas son las
+actuales.
+
+| Fichero | Habilidad | Descripción |
+| --- | --- | --- |
+| `icon_oracle_q.png` | Cadena de relámpagos | a forked violet lightning bolt branching into three separate arcs that leap to small glowing points, each arc thinner and dimmer than the one before |
+| `icon_oracle_w.png` | Tormenta de escarcha | jagged ice shards falling into a shallow circular area seen in slight perspective, pale cyan shards over a violet ground ring |
+| `icon_oracle_e.png` | Sello de éter | a circular rune seal lying flat on the ground, its lines cracking apart from the centre with violet light bursting up through the breaks |
+| `icon_oracle_r.png` | Meteoro del umbral | a burning meteor falling steeply from the upper left, violet flame trail and embers streaming behind it |
+
+### Talon of the Silent Grove — verde bosque, cuero, oro pálido, brillo verde menta
+
+| Fichero | Habilidad | Descripción |
+| --- | --- | --- |
+| `icon_talon_q.png` | Flecha perforante | a single arrow seen from the side driving clean through three thin silhouetted targets in a straight line, pale gold shaft, mint green trail |
+| `icon_talon_w.png` | Trampa de red | a weighted net caught mid-snap, knotted cord spread open with small weights at four corners, leather brown cord and mint green glow at the knots |
+| `icon_talon_e.png` | Paso del viento | a sharp forward-leaning chevron of motion, three mint green afterimages trailing behind it, nothing else |
+| `icon_talon_r.png` | Lluvia de flechas | five arrows falling steeply in parallel into a small flattened ellipse of ground, pale gold on forest green |
+
+### Vesper of the First Light — blanco hueso, marrón cálido, oro, brillo crema
+
+| Fichero | Habilidad | Descripción |
+| --- | --- | --- |
+| `icon_vesper_q.png` | Luz punzante | a narrow lance of warm light driving forward and splitting at its tip, one half continuing ahead and one half curving back as a soft returning ribbon |
+| `icon_vesper_w.png` | Círculo de auxilio | a consecrated ring lying flat on the ground with warm cream light rising from its whole perimeter like a low wall of glow |
+| `icon_vesper_e.png` | Égida del alba | a rounded shield of overlapping light feathers closing protectively around a small central silhouette, gold rim |
+| `icon_vesper_r.png` | Alba | a sunrise breaking over a straight horizon line, rays fanning out wide and low, radiant gold and cream |
 
 ---
 
-## 3. Hojas de referencia de personaje — `1024 × 1024`
+## 3. Iconos de objeto de tienda — `256 × 256`
+
+Misma plantilla y mismas reglas que los de habilidad. Hoy los 24 objetos toman
+prestado el icono de alguna habilidad, así que **cada uno necesita el suyo**.
+
+### Pertrechos — T1 (oro)
+
+| Fichero | Objeto | Descripción |
+| --- | --- | --- |
+| `icon_item_whetstone.png` | Piedra de amolar | a rectangular whetstone with a blade drawn across it at an angle, two or three sparks leaping off the edge |
+| `icon_item_hunter_gloves.png` | Guantes del cazador | a pair of worn leather archer's bracers with laced cord, one slightly behind the other |
+| `icon_item_iron_plate.png` | Placa de hierro | a riveted iron breastplate seen head-on, heavy rolled edges, dark steel |
+| `icon_item_rune_focus.png` | Foco rúnico | a faceted crystal held in a four-pronged metal claw, violet light inside |
+| `icon_item_swift_boots.png` | Botas veloces | a tall leather boot in profile with three short motion lines behind the heel |
+
+### Pertrechos — T2 (oro)
+
+| Fichero | Objeto | Descripción |
+| --- | --- | --- |
+| `icon_item_duelist_edge.png` | Filo del duelista | a slender duelling blade crossed over a short parrying dagger, pale steel with a gold guard |
+| `icon_item_lifedrinker.png` | Bebedor de vida | a squat chalice with fangs along its rim and a single dark red drop falling into it |
+| `icon_item_warding_sigil.png` | Sigilo de guarda | a hexagonal ward sigil of layered engraved rings, cold pale blue rim light |
+
+### Pertrechos — T3 (oro)
+
+| Fichero | Objeto | Descripción |
+| --- | --- | --- |
+| `icon_item_crown_of_hours.png` | Corona de las horas | a heavy crown whose points are clock hands of different lengths, muted gold |
+| `icon_item_titans_heart.png` | Corazón de titán | a massive stone heart bound in iron bands, warm orange light glowing out of the cracks |
+
+### Pociones
+
+Tres de vida y tres de maná, en tres tamaños. **La progresión tiene que leerse
+de un vistazo**: el frasco crece y gana herrajes, el color no cambia dentro de
+cada familia.
+
+| Fichero | Objeto | Descripción |
+| --- | --- | --- |
+| `icon_potion_health_minor.png` | Poción de vida menor | a small round glass flask with a cork, filled with deep red liquid |
+| `icon_potion_health_greater.png` | Poción de vida mayor | a taller shouldered glass flask with a brass collar, filled with deep red liquid |
+| `icon_potion_health_supreme.png` | Poción de vida suprema | a large faceted glass flask in a brass cage with an ornate stopper, filled with deep red liquid |
+| `icon_potion_mana_minor.png` | Poción de maná menor | a small round glass flask with a cork, filled with cold blue liquid |
+| `icon_potion_mana_greater.png` | Poción de maná mayor | a taller shouldered glass flask with a silver collar, filled with cold blue liquid |
+| `icon_potion_mana_superior.png` | Poción de maná superior | a large faceted glass flask in a silver cage with an ornate stopper, filled with cold blue liquid |
+
+### Tratados
+
+Los cuatro comparten formato a propósito: son la misma categoría y deben
+reconocerse como grupo. Lo que cambia es el símbolo sobre la página.
+
+| Fichero | Objeto | Descripción |
+| --- | --- | --- |
+| `icon_book_power.png` | Tratado de poder | an open book seen from above, a rising sword symbol glowing on the page |
+| `icon_book_vitality.png` | Tratado de vitalidad | an open book seen from above, a heart symbol glowing on the page |
+| `icon_book_focus.png` | Tratado de concentración | an open book seen from above, an eye symbol glowing on the page |
+| `icon_book_experience.png` | Tomo de experiencia | a thick closed tome with a metal clasp and a four-pointed star set into the cover |
+
+### Sabotaje — T2 (influencia)
+
+Estos cuatro **no van en dorado**: la cámara del sabotaje se tiñe de violeta en
+la interfaz (`#c79ae8`). Que la paleta los separe de un vistazo del resto de la
+tienda es parte de su función.
+
+| Fichero | Objeto | Descripción |
+| --- | --- | --- |
+| `icon_sab_reinforcements.png` | Refuerzos | a curved war-horn with three small marching silhouettes emerging from its mouth, violet |
+| `icon_sab_frenzy.png` | Frenesí | a spiked collar trailing a lash, three hard motion chevrons behind it, violet |
+| `icon_sab_elite.png` | Invocar élite | a hunched creep silhouette wearing a small jagged crown, outlined by a thick violet aura |
+| `icon_sab_hex.png` | Maleficio | a cracked skull sigil with a downward-pointing violet arrow driven through it |
+
+---
+
+## 4. Rótulos de tienda — `1024 × 256`
+
+Dos, uno por tienda. Van de cabecera del panel, que mide 34 rem (unos 544 px),
+así que la proporción 4:1 reduce limpio.
+
+**Estos no llevan alfa**: son una franja opaca. La composición debe concentrarse
+en el centro y **apagarse hacia los dos extremos**, para que funda con el panel
+sin un corte duro. Sin texto: el título lo escribe la interfaz encima.
+
+```
+[PREÁMBULO DE ARTE]
+Wide horizontal banner strip, 4:1. Opaque, no transparency. Composition centred
+and fading to darkness at both the left and right edges. No text, no lettering,
+no logos. Shallow depth, read as a backdrop and not as a scene to look into.
+Subject: <DESCRIPCIÓN>
+```
+
+| Fichero | Tienda | Descripción |
+| --- | --- | --- |
+| `shop_banner_hero.png` | T1 · Pertrechos del héroe | an armourer's counter seen head-on: racked blades and shields behind, a breastplate on a stand, warm forge light glowing from the left, brass and gold trim, dark timber |
+| `shop_banner_sabotage.png` | T2 · Cámara del sabotaje | a dark vaulted undercroft: a low brazier of violet flame at the centre, hanging chains, a table of stoppered vials and foul reagents, cold violet rim light on wet stone |
+
+---
+
+## Entrega de los iconos y rótulos (secciones 2, 3 y 4)
+
+Todo esto en `public/icons/`, con el nombre exacto de la tabla. Los nombres los
+uso tal cual para cablearlos, así que si cambias uno, dímelo.
+
+Si generarlos de uno en uno sale caro, se pueden pedir en rejilla **2×2 a
+1024 × 1024** agrupando los cuatro de un mismo héroe o familia: salen con el
+mismo estilo entre ellos, que es justo lo que se quiere dentro de un grupo, y yo
+los troceo al integrarlos. El riesgo es que el modelo no respete la rejilla; si
+sale torcida, se repite esa tanda suelta.
+
+---
+
+## 5. Hojas de referencia de personaje — `1024 × 1024`
 
 **El asset de mayor valor a medio plazo.** No se importan al juego: las uso para
 parametrizar el constructor procedural de personajes.
@@ -175,7 +344,7 @@ Personajes, con la silueta que ya define nuestro catálogo (`src/units/catalog.t
 
 ---
 
-## 4. Texturas de material — `1024 × 1024` (opcional)
+## 6. Texturas de material — `1024 × 1024` (opcional)
 
 Solo si te resulta cómodo. Condiciones **estrictas**, y si no se cumplen no sirven:
 
