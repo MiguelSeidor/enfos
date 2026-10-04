@@ -3202,6 +3202,30 @@ const titan: CharacterDef = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────────────────────
+// 11. Rompehuesos — melee creep with a flail
+//
+// An art slot of its own rather than the Ogro's. Both creeps pointed at
+// `creep.bastion`, so binding authored art there would have turned the Ogro
+// into an armoured knight as well.
+//
+// This procedural build is a FALLBACK ONLY, and it is deliberately the Ogro's:
+// it is drawn only if crusader.glb fails to load, and a second hand-built
+// creature earns nothing when the authored one is what ships. See
+// `creep.breaker` in AUTHORED_MANIFEST (build/authoredCharacter.ts).
+const breaker: CharacterDef = {
+  ...bastion,
+  id: 'creep.breaker',
+  name: 'Rompehuesos',
+  // Its own descriptor, not the Ogro's. `unitView.resolveDef` looks a character
+  // up by `visual.rigId` and not by `id`, so a spread that keeps the Ogro's
+  // descriptor resolves this creep straight back to the Ogro: the authored
+  // model is never asked for and the creature renders through the procedural
+  // batch, with nothing logged, because from the view's side nothing went
+  // wrong. Any new art slot needs a rigId of its own.
+  visual: visual('creep.breaker', 'pot-bellied-ogre-club', OGRE_PALETTE, 1, ['skin', 'leather']),
+};
+
 export const CHARACTERS: readonly CharacterDef[] = [
   bulwark,
   oracle,
@@ -3211,6 +3235,7 @@ export const CHARACTERS: readonly CharacterDef[] = [
   spinebolt,
   duskrunner,
   bastion,
+  breaker,
   hexwright,
   titan,
 ];

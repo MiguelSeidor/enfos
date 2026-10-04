@@ -30,10 +30,8 @@ import { Faction, UnitKind } from '@/core/contracts';
 import {
   TerrainKey,
   UnitKey,
-  UnitViewKey,
   type TerrainService,
   type UnitService,
-  type UnitViewService,
 } from '@/core/services';
 import { angleTo, dist, dist2, rotateToward } from '@/core/mathx';
 import { MAP_HALF } from '@/world/layout';
@@ -81,7 +79,6 @@ export class MovementModule implements GameModule {
   private units!: UnitService;
   private terrain!: TerrainService;
   private combat!: CombatModule;
-  private view?: UnitViewService;
   private bucket = 0;
   private readonly neighbours: number[] = [];
   private paths!: PathFinder;
@@ -129,7 +126,6 @@ export class MovementModule implements GameModule {
     this.ctx = ctx;
     this.units = ctx.services.get(UnitKey);
     this.terrain = ctx.services.get(TerrainKey);
-    this.view = ctx.services.tryGet(UnitViewKey);
     // Clearance is a little under a hero's radius: enough to keep routes off
     // terrace lips, not so much that it refuses the lane's narrowest neck.
     this.paths = new PathFinder(this.terrain, MAP_HALF, MAX_SLOPE, 0.7);
@@ -178,7 +174,6 @@ export class MovementModule implements GameModule {
       // so a stunned unit is genuinely inert rather than merely slowed.
       if (runtime.stunnedUntilTick && tick < runtime.stunnedUntilTick) {
         this.decelerate(unit, step);
-        this.playLocomotion(unit, 0);
         continue;
       }
 
@@ -269,7 +264,6 @@ export class MovementModule implements GameModule {
 
     if (!goal) {
       this.decelerate(unit, step);
-      this.playLocomotion(unit, 0);
       return;
     }
 
@@ -277,12 +271,10 @@ export class MovementModule implements GameModule {
     if (d <= holdAt) {
       this.decelerate(unit, step);
       this.face(unit, goal, step);
-      this.playLocomotion(unit, 0);
       return;
     }
 
     this.seek(unit, goal, step);
-    this.playLocomotion(unit, hypot(unit.vel.x, unit.vel.z));
   }
 
   /**
@@ -293,19 +285,20 @@ export class MovementModule implements GameModule {
     const rt = runtime!;
     const core = this.corePositions[rt.siteTeam];
     if (!core) return null;
-    // Fliers ignore the lane outright and head for the Core in a straight line.
-    // Bypassing only the terrain check was not enough: they still walked the
-    // authored waypoints, so they flew the corridor like everything else and
-    // the trait bought nothing. Cutting the corner *is* the threat.
-    if (rt.traits?.flying) {
-      // Fliers leak like walkers. They used to stop 1.5 m short and hover over
-      // the Core forever, never costing a life and never letting the wave end.
-      if (dist2(unit.pos, core) < 9) {
-        this.onLeak?.(unit);
-        return null;
-      }
-      return core;
-    }
+    // Everything walks the lane, fliers included.
+    //
+    // They used to ignore it and head straight for the Core, which was the
+    // whole point of the trait: a player parked at a choke had to notice and
+    // reposition. The owner cut it on 2026-10-04 because in practice it asked
+    // them to hold the lane and the open ground at the same time, and a run to
+    // wave 14 was not survivable. The creature it belongs to also renders
+    // invisible today -- see the missing `creep.stalker` art slot -- so the
+    // threat arrived with no warning at all, which is most of why it read as
+    // unfair rather than as pressure. If that art lands, this is the decision
+    // to revisit first.
+    //
+    // Flight still means something: `sight.ts` puts the creature's eye above
+    // the ridges and `unitView` hovers it. It just no longer cuts the corner.
     const lane = rt.lane;
     if (lane.length === 0) return core;
 
@@ -341,12 +334,10 @@ export class MovementModule implements GameModule {
         // straight into the wall.
         if (dist(hero.pos, target.pos) > reach * 0.9 || !this.combat.canSee(hero, target)) {
           this.seek(hero, this.nextRouteStep(hero, target.pos), step);
-          this.playLocomotion(hero, hypot(hero.vel.x, hero.vel.z));
         } else {
           this.routes.delete(hero.id);
           this.decelerate(hero, step);
           this.face(hero, target.pos, step);
-          this.playLocomotion(hero, 0);
         }
         return;
       }
@@ -365,11 +356,9 @@ export class MovementModule implements GameModule {
         const reach = hero.stats.attackRange + hero.radius + found.radius;
         if (dist(hero.pos, found.pos) > reach * 0.9) {
           this.seek(hero, found.pos, step);
-          this.playLocomotion(hero, hypot(hero.vel.x, hero.vel.z));
         } else {
           this.decelerate(hero, step);
           this.face(hero, found.pos, step);
-          this.playLocomotion(hero, 0);
         }
         return;
       }
@@ -379,11 +368,9 @@ export class MovementModule implements GameModule {
         heroOrders.delete(hero.id);
         this.routes.delete(hero.id);
         this.decelerate(hero, step);
-        this.playLocomotion(hero, 0);
         return;
       }
       this.seek(hero, this.nextRouteStep(hero, order.pos), step);
-      this.playLocomotion(hero, hypot(hero.vel.x, hero.vel.z));
       return;
     }
 
@@ -392,7 +379,6 @@ export class MovementModule implements GameModule {
         heroOrders.delete(hero.id);
         this.routes.delete(hero.id);
         this.decelerate(hero, step);
-        this.playLocomotion(hero, 0);
         return;
       }
 
@@ -402,7 +388,6 @@ export class MovementModule implements GameModule {
       // planned route instead, and seek only the next waypoint.
       const waypoint = this.nextRouteStep(hero, order.pos);
       this.seek(hero, waypoint, step);
-      this.playLocomotion(hero, hypot(hero.vel.x, hero.vel.z));
       // Auto-acquire while moving so a hero fights what walks into it.
       if (hero.targetId === null) {
         hero.targetId = this.combat.nearestHostile(hero, hero.stats.attackRange + 1)?.id ?? null;
@@ -416,7 +401,6 @@ export class MovementModule implements GameModule {
     const found = this.combat.nearestHostile(hero, hero.stats.attackRange + 2);
     hero.targetId = found?.id ?? null;
     if (found) this.face(hero, found.pos, step);
-    this.playLocomotion(hero, 0);
   }
 
   /**
@@ -549,14 +533,11 @@ export class MovementModule implements GameModule {
     const nx = unit.pos.x + vx * step;
     const nz = unit.pos.z + vz * step;
 
-    // Fliers ignore the ground entirely. No walkability test, no slope gate:
-    // that is the whole trait, and it is what lets one creep cross the gorge
-    // and the highland the rest of the map forces everything to walk around.
-    if (runtimeOf(unit.id)?.traits?.flying) {
-      unit.pos.x = nx;
-      unit.pos.z = nz;
-      return;
-    }
+    // Fliers are held to the ground rules too, which is not redundant with
+    // walking the lane: steering and separation push a creep off the line
+    // between two waypoints, and without this a flier drifts over the gorge on
+    // every corner and rejoins further along. Following the lane only means
+    // anything if the ground between the waypoints is respected.
 
     // Try the full step, then each axis alone, so a blocked diagonal slides
     // along the obstacle instead of stopping dead against it.
@@ -603,11 +584,6 @@ export class MovementModule implements GameModule {
     unit.facing = rotateToward(unit.facing, angleTo(unit.pos, at), 9 * step);
   }
 
-  private playLocomotion(unit: UnitState, speed: number): void {
-    if (!this.view) return;
-    const clip = speed < 0.5 ? 'idle' : speed > unit.stats.moveSpeed * 0.75 ? 'run' : 'walk';
-    this.view.playAnimation(unit.id, clip, 0.2);
-  }
 }
 
 // ── Hero order queue ─────────────────────────────────────────────────────────

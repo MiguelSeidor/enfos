@@ -18,7 +18,10 @@
       "Bash(python -c ' *)",
       "Bash(node \"C:/Users/Mouse/AppData/Local/Temp/claude/D--Enfos/1bd1768e-dba9-4930-b7b6-ad11165176c6/scratchpad/hist.mjs\" qa/shots/render/overview.png qa/shots/render/lane.png qa/shots/render/hero.png qa/shots/render/skyline.png)",
       "Bash(python -)",
-      "PowerShell(cd D:\\\\Enfos; git status --short; \"---\"; npx tsc --noEmit 2>&1 | Select-Object -First 20; if\\($LASTEXITCODE -eq 0\\){\"TYPECHECK OK\"}else{\"exit $LASTEXITCODE\"})"
+      "PowerShell(cd D:\\\\Enfos; git status --short; \"---\"; npx tsc --noEmit 2>&1 | Select-Object -First 20; if\\($LASTEXITCODE -eq 0\\){\"TYPECHECK OK\"}else{\"exit $LASTEXITCODE\"})",
+      "PowerShell(cd D:\\\\Enfos; npx tsc --noEmit 2>&1 | Select-Object -First 20; if\\($LASTEXITCODE -eq 0\\){\"TYPECHECK OK\"}else{\"TYPECHECK FAILED exit $LASTEXITCODE\"})",
+      "PowerShell(cd D:\\\\Enfos; npx tsc --noEmit 2>&1 | Select-Object -First 20; if\\($LASTEXITCODE -eq 0\\){\"TYPECHECK OK\"}else{\"exit $LASTEXITCODE\"})",
+      "PowerShell(cd D:\\\\Enfos; npx tsc --noEmit 2>&1 | Select-Object -First 15; if\\($LASTEXITCODE -eq 0\\){\"TYPECHECK OK\"}else{\"exit $LASTEXITCODE\"})"
     ]
   }
 }

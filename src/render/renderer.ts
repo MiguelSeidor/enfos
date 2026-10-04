@@ -371,9 +371,23 @@ export class RenderModule implements GameModule {
     this.tier = tier;
     const q = QUALITY[tier];
 
+    const ratioBefore = this.renderer.getPixelRatio();
     this.renderer.setPixelRatio(
       Math.min(window.devicePixelRatio || 1, q.pixelRatioCap, MAX_PIXEL_RATIO),
     );
+    // Changing the pixel ratio resizes the canvas drawing buffer, and the
+    // composer's buffers do not follow on their own: they were allocated at the
+    // drawing buffer size in effect the last time anything called `resize`.
+    // Compositing a 2000x1125 buffer onto a 2400x1350 canvas draws the entire
+    // scene at the wrong scale, which reads as a second copy of every object
+    // offset to one side -- creeps, buildings, the Core, all of it. Only the
+    // tier whose cap happens to match the allocation looks correct, so on one
+    // machine the clean tier is low and on another it is high, and it got
+    // blamed on whichever character was added most recently.
+    //
+    // Each tier caps the ratio differently, so this fires on every tier change
+    // on any display with scaling, and `resize` is where sizing lives.
+    if (this.renderer.getPixelRatio() !== ratioBefore) this.resize(this.width, this.height);
     this.shadow.configure(q.shadowMapSize, q.shadowRange);
     this.applyAnisotropy(q.anisotropy);
 

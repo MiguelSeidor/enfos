@@ -142,6 +142,84 @@ const CHARACTERS = {
     },
   },
 
+  crusader: {
+    out: 'public/models/crusader.glb',
+    base: 'base.fbx',
+    // Both materials take the same sheet, which is not a mistake.
+    //
+    // The pack ships two albedos, `1_body_Albedo` at 4096 and `1_weapon_Albedo`
+    // at 2048, and the obvious reading -- body material gets the body sheet,
+    // weapon material gets the weapon sheet -- is wrong twice over. There is no
+    // weapon material: `lambert2` is the single body mesh and `lambert1` is all
+    // 26 loose pieces, the 19 armour plates AND the flail and shield together,
+    // so one texture has to serve both. And the sheet that serves them is the
+    // body one: rendered against the source, the pauldrons, knee cops, belt and
+    // boots are right with it and grey smears without it, and the tabard, mail
+    // and heraldry only resolve with it on the body mesh too.
+    //
+    // The weapon sheet holds the shield face and the flail head, and nothing in
+    // the base mesh's materials references it; it belongs to the separate
+    // weapon prefab in the Unity folder. The cost is that the flail handle,
+    // 48 triangles, samples the body sheet and reads a little off up close.
+    // At 79 pixels it does not show. Splitting that material would be the fix
+    // if it ever does.
+    //
+    // Decide this by rendering, never by the filename, and beware of the trap
+    // that cost an hour here: a comparison script that swaps materials in place
+    // destroys the names it is keying on, so the second render silently paints
+    // everything with one texture and looks like a clean result.
+    atlas: {
+      width: 2048,
+      height: 1024,
+      parts: [
+        // `lambert1` and `lambert2` share a cell on purpose: they are different
+        // materials that use the same sheet, each with its own 0..1 UVs, so one
+        // copy of the body texture serves both.
+        { material: 'lambert2', file: 'body.tga', x: 0, y: 0, w: 1024, h: 1024 },
+        { material: 'lambert1', file: 'body.tga', x: 0, y: 0, w: 1024, h: 1024 },
+        { material: 'weapon', file: 'weapon.tga', x: 1024, y: 0, w: 1024, h: 1024 },
+      ],
+    },
+    // Taken from the pack's own prefab rather than guessed: seven renderers
+    // carry the blunt material and they are exactly weapon1 through weapon7.
+    materialByMesh: [{ test: '^weapon', material: 'weapon' }],
+    // Generous on lambert1 on purpose: it carries the chain, and a chain is the
+    // shape decimation destroys first. 4,863 down to 3,200 is a 34% cut rather
+    // than the half it would take to hit the usual budget, and the flail is the
+    // whole reason this creature reads as a flail.
+    // The flail and shield now have a budget of their own, which is what the
+    // chain needed: it is the shape decimation destroys first, and sharing a
+    // number with nineteen armour plates hid that.
+    budget: { lambert1: 2100, lambert2: 1100, weapon: 1100 },
+    // The flail is a bone chain: ball, twelve links and a handle. Bone
+    // reduction has already eaten a weapon on this project twice, so name the
+    // pieces and let the conversion fail loudly instead of shipping a knight
+    // swinging at nothing.
+    verifyBones: ['ball_on_a_club1', 'stick_of_a_club1', 'chain1', 'chain12', 'shield1'],
+    clips: {
+      idle: { file: 'crusadershield@idle1.fbx', trim: 'loop' },
+      walk: { file: 'crusadershield@walk.fbx', trim: 'loop' },
+      run: { file: 'crusadershield@run.fbx', trim: 'loop' },
+      // Measured rather than guessed. Every file in this pack declares 8.33 s
+      // or 14.17 s and then holds its last pose: tracking the flail head
+      // through atack1 puts the swing between 1.27 s and 3.23 s with the peak
+      // at 2.03 s, and nothing moves on either side of that.
+      //
+      // 3.5x puts the 2.1 s window into 0.6 s. Slower than the orc's 0.30 s
+      // spin on purpose -- this is a weighted head on a chain, and a flail that
+      // snaps reads as a stick. The Rompehuesos swings every 1.67 s, so 0.6 s
+      // of swing leaves the blow legible with the recovery still visible.
+      attack: { file: 'crusadershield@atack1.fbx', trim: 'window', window: [1.2, 3.3], speed: 3.5 },
+      // Both measured off the hips rather than left to the automatic rules,
+      // which this pack defeats. The flinch runs the full 2.47 s, which is a
+      // stagger and not a reaction, so it is capped at a beat. The fall takes
+      // 0.13 s to 4.13 s and then lies still; `span` read the stillness as
+      // motion and kept 11.69 s of corpse.
+      hit: { file: 'crusadershield@gethit.fbx', trim: 'burst', maxSeconds: 0.9 },
+      death: { file: 'crusadershield@death.fbx', trim: 'window', window: [0.1, 4.2] },
+    },
+  },
+
   mutant: {
     out: 'public/models/mutant.glb',
     base: 'base_mesh.fbx',
@@ -199,12 +277,36 @@ const inPage = async (character) => {
   // Bones are shared scene nodes; only the per-skeleton ORDER differs. Keying
   // by name collapses the 49 orderings into one.
   const boneByName = new Map();
+  // The bind inverse has to be carried along with the bone, because three will
+  // happily invent one and the one it invents is wrong for any bone the file
+  // does not currently hold at its bind pose. See `inverses` below.
+  const inverseByName = new Map();
   for (const part of parts) {
-    for (const bone of part.skeleton.bones) {
-      if (!boneByName.has(bone.name)) boneByName.set(bone.name, bone);
-    }
+    part.skeleton.bones.forEach((bone, i) => {
+      if (boneByName.has(bone.name)) return;
+      boneByName.set(bone.name, bone);
+      inverseByName.set(bone.name, part.skeleton.boneInverses[i].clone());
+    });
   }
   const bones = [...boneByName.values()];
+  /**
+   * The bind pose, taken from the file rather than recomputed.
+   *
+   * `new THREE.Skeleton(bones)` with no inverses calls `calculateInverses`,
+   * which treats wherever the bones happen to be standing as the bind pose.
+   * That is true for most of a character and false for exactly the parts that
+   * matter: a prop is modelled at the origin and then posed into the hand, so
+   * its bones sit far from their own bind pose in the file as shipped.
+   *
+   * On this crusader 101 of 125 bones are at bind and 24 are not, and the 24
+   * are the shield, the flail handle, its twelve chain links, the three bones
+   * of the head and the fingertips. Recomputing their inverses bakes the
+   * displacement in permanently: the mace head and the shield render half a
+   * metre off the hands that hold them and drift alongside the character, which
+   * is what a floating weapon actually is. The body looks perfect throughout,
+   * because the body IS at bind.
+   */
+  const inverses = bones.map((b) => inverseByName.get(b.name));
   const slotOf = new Map(bones.map((b, i) => [b.name, i]));
   say('bones', bones.length);
   say('axeBones', bones.filter((b) => /_axe_/i.test(b.name)).map((b) => b.name).join(', ') || 'NONE');
@@ -215,7 +317,21 @@ const inPage = async (character) => {
   for (const part of parts) {
     const g = part.geometry;
     const count = g.getAttribute('position').count;
-    const name = (Array.isArray(part.material) ? part.material[0] : part.material).name || 'default';
+    // Which group this submesh belongs to.
+    //
+    // Normally the FBX material name, but a pack can need a finer split than
+    // the FBX records. This crusader is the case that forced it: its author
+    // left ONE material on the armour plates and on the flail and shield
+    // together, and fixed it up per object in the Unity prefab, which assigns
+    // `Crusader tank_body` to the nineteen body meshes and `Crusader tank_blunt`
+    // to the seven weapon ones. Follow the FBX and no assignment is right --
+    // put that material on the body sheet and the shield renders in tabard
+    // checks, put it on the weapon sheet and the pauldrons and knee cops turn
+    // to grey smears. The split has to come from the mesh names.
+    let name = (Array.isArray(part.material) ? part.material[0] : part.material).name || 'default';
+    for (const rule of character.materialByMesh ?? []) {
+      if (new RegExp(rule.test, 'i').test(part.name)) { name = rule.material; break; }
+    }
     if (!byMaterial.has(name)) byMaterial.set(name, []);
 
     const pos = new Float32Array(count * 3);
@@ -377,7 +493,28 @@ const inPage = async (character) => {
       RECT[name] = rect;
       const m = sourceOf.get(name);
       const img = m && m.map && m.map.image;
-      if (img && img.width) ctx.drawImage(img, rect.x, rect.y, rect.w, rect.h);
+      if (img && img.width) {
+        // Drawn upside down, on purpose. These textures come from an FBX, and
+        // three samples an FBX texture with flipY = true: v = 0 is the BOTTOM
+        // row of the stored image. The atlas is sampled with flipY = false, so
+        // v = 0 is the TOP row, and the UV remap further down is a plain linear
+        // scale into the cell with no flip of its own. Drawing the image the
+        // way it is stored therefore mirrors every UV island vertically.
+        //
+        // It is not subtle once seen and it is invisible until it is: the
+        // archer's face sits at the top of her texture, her head UVs landed
+        // 0.7 of the way down the cell, over the chest, and she shipped with a
+        // blank head. Skin over skin looks like bad shading rather than like a
+        // wrong lookup, which is why it survived a build.
+        //
+        // The file path does this already, inside `shrink`, which is why the
+        // orc and the mutant are correct and only this path was wrong.
+        ctx.save();
+        ctx.translate(rect.x, rect.y + rect.h);
+        ctx.scale(1, -1);
+        ctx.drawImage(img, 0, 0, rect.w, rect.h);
+        ctx.restore();
+      }
       else { ctx.fillStyle = '#808080'; ctx.fillRect(rect.x, rect.y, rect.w, rect.h); }
       // Say WHICH link broke. "MISSING" on its own sent the last build out with
       // a flat grey atlas and no clue where to look.
@@ -421,7 +558,7 @@ const inPage = async (character) => {
   ];
 
   // ── 4. The skinned mesh ───────────────────────────────────────────────────
-  const skeleton = new THREE.Skeleton(bones);
+  const skeleton = new THREE.Skeleton(bones, inverses);
   const mesh = new THREE.SkinnedMesh(geometry, materials[0]);
   mesh.name = 'orc';
   // The bones live under the FBX root; keep that hierarchy and hang the mesh
@@ -465,19 +602,31 @@ const inPage = async (character) => {
       }
       if (range < 1e-4) continue; // a track that holds one pose says nothing
       const eps = range * 0.02;
+      // Measured against the first key at the head and the LAST key at the
+      // tail, which is not symmetry for its own sake. A padded clip holds a
+      // pose, and which pose it holds is up to whoever exported it: the orc's
+      // files return to their first frame, the crusader's freeze on their last.
+      // Judging the tail by its distance from the FIRST key only trims the
+      // first kind, and the second kind sails through untouched -- a 14.17 s
+      // walk whose cycle is one second, so the creature takes fourteen seconds
+      // to complete a stride and reads as gliding. Judging the tail by its
+      // distance from the last key finds where the hold begins in both, and for
+      // a clip that returns to its start the two tests are the same test.
       let first = -1;
       let last = -1;
+      const lastAt = (n - 1) * size;
       for (let i = 0; i < n; i++) {
-        let delta = 0;
+        let fromHead = 0;
+        let fromTail = 0;
         for (let c = 0; c < size; c++) {
-          delta = Math.max(delta, Math.abs(track.values[i * size + c] - track.values[c]));
+          const v = track.values[i * size + c];
+          fromHead = Math.max(fromHead, Math.abs(v - track.values[c]));
+          fromTail = Math.max(fromTail, Math.abs(v - track.values[lastAt + c]));
         }
-        if (delta > eps) {
-          if (first < 0) first = i;
-          last = i;
-        }
+        if (first < 0 && fromHead > eps) first = i;
+        if (fromTail > eps) last = i;
       }
-      if (first < 0) continue;
+      if (first < 0 || last < 0) continue;
       t0 = Math.min(t0, track.times[Math.max(0, first - 1)]);
       t1 = Math.max(t1, track.times[Math.min(n - 1, last + 1)]);
     }
@@ -837,7 +986,9 @@ const inPage = async (character) => {
     }
 
     root.updateMatrixWorld(true);
-    const reduced = new THREE.Skeleton(kept);
+    // Same reason as above: rebuilding from a subset must carry each kept
+    // bone's own bind inverse, or the reduction undoes the fix.
+    const reduced = new THREE.Skeleton(kept, kept.map((b2) => inverseByName.get(b2.name)));
     mesh.bind(reduced, new THREE.Matrix4());
     let left = 0;
     root.traverse(() => left++);

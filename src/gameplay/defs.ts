@@ -183,11 +183,13 @@ export const ENEMIES: Record<string, EnemyDef> = {
   // above their raw stats because the answer is attention, not damage.
 
   /**
-   * Flies straight to the Core, ignoring the lane completely.
+   * Hovers above the lane, seeing and being seen over the ridges.
    *
-   * The map's whole shape assumes enemies walk the corridor; this one does not,
-   * so a player who has parked at a choke has to notice and reposition.
-   * Deliberately fragile — it is a timer, not a fight.
+   * It used to fly straight at the Core and ignore the corridor entirely, which
+   * is what made it a repositioning problem rather than a fight. That was cut
+   * on 2026-10-04: it asked the player to hold two places at once, and the
+   * creature has no art yet, so it arrived invisible. Deliberately fragile —
+   * it is a timer, not a fight — and right now that is all it is.
    */
   wraith: {
     characterId: 'creep.stalker',
@@ -281,7 +283,9 @@ export const ENEMIES: Record<string, EnemyDef> = {
    * in the middle of a pack a real decision rather than a free damage window.
    */
   breaker: {
-    characterId: 'creep.bastion',
+    // Its own art slot, not the Ogro's: this one ships as authored art and the
+    // Ogro does not.
+    characterId: 'creep.breaker',
     name: 'Rompehuesos',
     behavior: 'hunter',
     stats: stats({

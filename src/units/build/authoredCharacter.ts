@@ -53,6 +53,7 @@ export const AUTHORED_MANIFEST: Record<string, AuthoredEntry> = {
   'creep.cleaver': { url: '/models/orc.glb', height: 2.0 },
   'creep.duskrunner': { url: '/models/mutant.glb', height: 2.0 },
   'creep.spinebolt': { url: '/models/erika.glb', height: 1.75 },
+  'creep.breaker': { url: '/models/crusader.glb', height: 1.95 },
 };
 
 export interface AuthoredCharacter extends ImportedSource {

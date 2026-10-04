@@ -67,6 +67,7 @@ export class UnitViewModule implements GameModule {
   private readonly views = new Map<EntityId, ViewRecord>();
   private readonly batches = new Map<string, CreepBatch>();
   private terrain!: TerrainService;
+  private ctx!: GameContext;
   /** Render-time clock for VAT playback and clip start stamps. */
   private time = 0;
   /** Mirror of the engine's fixed-step accumulator; see header. */
@@ -74,6 +75,7 @@ export class UnitViewModule implements GameModule {
   private readonly warned = new Set<string>();
 
   init(ctx: GameContext): void {
+    this.ctx = ctx;
     this.root.name = 'units';
     ctx.scene.add(this.root);
     this.terrain = ctx.services.get(TerrainKey);
@@ -225,13 +227,18 @@ export class UnitViewModule implements GameModule {
   }
 
   private setClip(record: ViewRecord, clip: ClipId, fade: number, force: boolean): void {
-    // Locomotion never interrupts an action that has not finished. `movement`
-    // re-asserts idle/walk/run on EVERY simulation tick, with force set, which
-    // is harmless for a loop and lethal for a one-shot: combat would start an
-    // attack and the next tick would replace it 33 ms later, so the swing never
-    // played for more than a frame. It hid for as long as it did because the
-    // procedural hero animator ignores a re-play of a loop it is already
-    // running, so the stomping only ever showed on one-shots.
+    // Locomotion never interrupts an action that has not finished. `autoClip`
+    // re-asserts idle/walk/run every frame, which is harmless for a loop and
+    // lethal for a one-shot: combat starts an attack and the next frame would
+    // replace it, so the swing never plays for more than a frame.
+    //
+    // `movement` used to assert locomotion too, from the simulation, with its
+    // own speed thresholds. Two selectors reading the same velocity through
+    // different rules agree for most characters and disagree inside a narrow
+    // band -- the archer travels at 3.22 m/s, which `movement` called a run and
+    // this called a walk -- and then each one reset the other's action every
+    // frame. Her legs articulated 0.08 m instead of 0.61 while her blend weight
+    // never rose above 0.3. Clip choice is presentation, so it lives here, once.
     if (LOCOMOTION.has(clip) && this.midOneShot(record)) return;
 
     if (record.view) {
@@ -260,6 +267,15 @@ export class UnitViewModule implements GameModule {
       return;
     }
     if (this.midOneShot(record)) return;
+    // A stunned unit has to read as inert. Deceleration is exponential, so its
+    // velocity takes about a fifth of a second to fall under the walk
+    // threshold, and a creep that keeps walking for that long after a stun
+    // lands looks like the stun did nothing.
+    const stunnedUntil = runtimeOf(unit.id)?.stunnedUntilTick;
+    if (stunnedUntil !== undefined && this.ctx.clock.tick < stunnedUntil) {
+      if (record.clip !== 'idle') this.setClip(record, 'idle', 0.12, true);
+      return;
+    }
     const prof = record.def.profile;
     // The threshold is the walk speed itself, not the midpoint between walk
     // and run. An authored walk cycle covers real ground: measured on the orc,
