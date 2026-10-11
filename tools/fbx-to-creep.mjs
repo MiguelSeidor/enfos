@@ -142,6 +142,89 @@ const CHARACTERS = {
     },
   },
 
+  /**
+   * The first hero to arrive as authored art, and the first character in this
+   * file that was not downloaded: generated from its own portrait in Rodin,
+   * rigged in AccuRig, animated from ActorCore. See docs/HERO_FROM_IMAGE.md.
+   *
+   * It is also the easiest entry here, and the reason is worth recording: the
+   * mesh arrives as ONE skinned mesh with ONE material and 101 bones, and all
+   * seven clips name those same 101 bones. No submesh remap, no per-mesh
+   * material table, no retargeting -- the three things that cost whole sessions
+   * on the orc and the crusader. That is what buying the rigger and the motions
+   * from the same vendor actually bought.
+   */
+  bulwark: {
+    out: 'public/models/bulwark.glb',
+    base: 'bulwark.fbx',
+    // Colour and normals ride inside the FBX at 2048; roughness and metalness
+    // came out as loose files the exporter never wired up, and at this
+    // distance neither is missed.
+    atlas: { embedded: true, size: 2048 },
+    // Twenty thousand, and the jump from 7,000 was forced by a measurement,
+    // not by taste. At 7,000 the hands decimated down to mitts: no surviving
+    // vertex was weighted to CC_Base_R_Mid1 or its neighbours, so step 6b
+    // dropped every finger bone in the right hand for driving nothing, and the
+    // left hand's middle finger measured a tip-to-knuckle ratio of 0.96 -- dead
+    // straight. A weapon in a flat open mitt reads as floating wherever it is
+    // placed, which is exactly what came back from the owner four times, and
+    // no amount of moving the hammer was ever going to fix it.
+    //
+    // The cost is nothing. Four heroes at 20,000 is 80,000 triangles against
+    // seventy creeps at 3,600, which is a quarter of a million.
+    budget: { model: 20000 },
+    // `Move in Place` in the exporter did not take, so the travel is stripped
+    // here instead. See `inPlace` below.
+    inPlace: true,
+    // Measured, not assumed: see the comment at the simplify call.
+    weld: { byPosition: true },
+    // The ActorCore export is Z-up; glTF is not. See step 8b.
+    upAxis: 'Z',
+    // Fingers survive the cull so the fists can be closed at load. See the
+    // note beside ALSO in step 6b.
+    alsoKeepBones: '(Index|Mid|Ring|Pinky|Thumb)\\d$',
+    clips: {
+      idle: { file: 'idle.fbx', trim: 'loop' },
+      // Three whole gait cycles, so the loop closes in phase.
+      //
+      // The clip is 8.75 s and holds a whole journey: start, paces, stop.
+      // Cutting it to 6.6 s removed the stop but left 3.8 cycles, and a
+      // loop that restarts mid-stride jumps -- which is the glide every
+      // fourth or fifth step. Left-foot peaks come at 1.75, 3.54, 5.29 and
+      // 7.0 s, so a cycle is 1.75 s and [1.75, 7.0] is exactly three.
+      walk: { file: 'walk.fbx', trim: 'window', window: [1.75, 7.0] },
+      // Two gait cycles, same reason as the walk above -- and this is the
+      // clip the glide was actually coming from. At 6.6 m/s the hero runs,
+      // not walks, and the walk was the one that got trimmed. Measured on
+      // the left foot: the first 0.8 s and the last 0.8 s are a man
+      // standing still, with the running between them and peaks at 1.0,
+      // 1.75 and 2.5 s.
+      run: { file: 'run.fbx', trim: 'window', window: [1.0, 2.5] },
+      // A 2.3 s overhead swing, of which the swing itself is a fraction; the
+      // rest is the wind-up and the recovery nobody waits for.
+      attack: { file: 'attack.fbx', trim: 'burst', maxSeconds: 1.3 },
+      // A roar. Three of Bulwark's four abilities go off in a circle around
+      // him, so a bellow reads for all of them.
+      // `burst` cut this to 0.21 s and the flinch below to 0.03 s -- one
+      // frame. Both are small, close-in gestures: a roar moves the chest and
+      // head while the hips stay put, and the burst detector measures every
+      // bone AGAINST the hips, so it reads almost no energy and collapses its
+      // own window. `span` uses a floor half as high and keeps the gesture.
+      cast: { file: 'cast.fbx', trim: 'span', maxSeconds: 1.6 },
+      hit: { file: 'hit.fbx', trim: 'span', maxSeconds: 1.0 },
+      // This clip does not end on the floor -- he falls and then stands back
+      // up, which on screen is a corpse getting to its feet. Cut at 2.3 s.
+      //
+      // The window is in the SOURCE file's time, not the trimmed clip's: a
+      // first attempt at 1.35 s was measured on the already-span-trimmed
+      // version and landed before the fall. Measured again on the raw FBX,
+      // and on its own up axis -- it is Z-up, so reading Y gave a profile
+      // that was not a height at all -- the head drops from 124 to 20 by
+      // 1.57 s, lies there to about 2.3, and is back at 132 by 4.1.
+      death: { file: 'death.fbx', trim: 'window', window: [0, 2.3] },
+    },
+  },
+
   crusader: {
     out: 'public/models/crusader.glb',
     base: 'base.fbx',
@@ -761,6 +844,34 @@ const inPage = async (character) => {
       if (boneByName.has(node)) kept.push(track);
       else unmatched.add(node);
     }
+    // Root travel, removed when the character asks for it.
+    //
+    // These ActorCore clips translate CC_Base_Hip forwards: 6 units over a
+    // walk, 19 over a run, 64 over a death. The exporter has a `Move in Place`
+    // checkbox and it did not take. It cannot stay: this engine moves a unit
+    // from `unit.vel` in the simulation, so a clip that ALSO moves it gives two
+    // movements at once and the mesh walks away from the thing it represents.
+    //
+    // Only the horizontal pair is flattened, to the value it holds at the
+    // first key. Height is left alone, because that is where a walk cycle's
+    // bob lives -- these particular clips happen to have none, but the next
+    // ones will, and a fix that quietly removes it would be found much later
+    // and blamed on something else.
+    //
+    // Opt-in per character: the orc, the mutant, the archer and the crusader
+    // all came from packs that ship their loops in place already, and running
+    // this over them would be a change with no reason behind it.
+    if (character.inPlace) {
+      for (const track of kept) {
+        if (!track.name.endsWith('.position')) continue;
+        if (!/(^|[_.])(Hip|Hips|BoneRoot|Root)$/i.test(track.name.split('.')[0])) continue;
+        const v = track.values;
+        if (v.length < 3) continue;
+        const x0 = v[0], z0 = v[2];
+        for (let i = 0; i < v.length; i += 3) { v[i] = x0; v[i + 2] = z0; }
+      }
+    }
+
     const whole = new THREE.AnimationClip(id, clip.duration, kept);
     let cut;
     if (source.trim === 'window') {
@@ -842,17 +953,110 @@ const inPage = async (character) => {
     BUDGET = {};
     for (const g of groups) BUDGET[g.name] = Math.max(60, Math.round((g.count / 3 / totalTris) * character.budget));
   }
+  /**
+   * A second weld, by position and UV only, handed to the simplifier alone.
+   *
+   * Measured on Bulwark, which would not decimate at all: 500,000 triangles in,
+   * 500,000 out, whatever the error ceiling and with or without LockBorder. The
+   * reason is that the simplifier collapses EDGES, and an edge only exists
+   * where two triangles share a vertex index. This mesh arrives from the FBX
+   * with 1,500,000 vertices for 500,000 triangles -- nothing shared at all --
+   * and the weld above only gets to 466,558, because its key includes the
+   * normal and this character is flat armour plates with a hard edge at every
+   * seam. Two thirds of the mesh stayed topologically shredded.
+   *
+   * Dropping the normal from the key takes it to 261,590 and the same call then
+   * reaches 6,997 triangles at an error of 0.0039.
+   *
+   * But the normals cannot simply be thrown away: this pipeline ships no normal
+   * map, so every bit of relief a plate has must come from its vertex normals,
+   * and welding a hard edge smooth would flatten the whole character.
+   *
+   * So the two are separated. The simplifier works on the position+UV mesh and
+   * decides WHICH triangles survive; the output keeps the original split
+   * vertices, and each surviving corner is given back the normal variant that
+   * best matches its own new face. A plate keeps its edge, and the simplifier
+   * gets the topology it needs.
+   *
+   * Opt-in, because the packs do not need it: they arrive properly indexed.
+   */
+  const byPosition = !!character.weld?.byPosition;
+  const posOf = new Int32Array(welded);
+  const variantsOf = [];
+  if (byPosition) {
+    const seenPos = new Map();
+    for (let i = 0; i < welded; i++) {
+      const q = (x) => Math.round(x * 2048);
+      const k = `${q(wPos[i * 3])},${q(wPos[i * 3 + 1])},${q(wPos[i * 3 + 2])}`
+        + `|${Math.round(wUv[i * 2] * 4096)},${Math.round(wUv[i * 2 + 1] * 4096)}`;
+      let at = seenPos.get(k);
+      if (at === undefined) { at = variantsOf.length; seenPos.set(k, at); variantsOf.push([]); }
+      posOf[i] = at;
+      variantsOf[at].push(i);
+    }
+    say('weldByPosition', `${welded} -> ${variantsOf.length} for the simplifier`);
+  }
+  const pPos = byPosition ? new Float32Array(variantsOf.length * 3) : wPos;
+  if (byPosition) {
+    for (let i = 0; i < welded; i++) {
+      const a = posOf[i];
+      pPos[a * 3] = wPos[i * 3]; pPos[a * 3 + 1] = wPos[i * 3 + 1]; pPos[a * 3 + 2] = wPos[i * 3 + 2];
+    }
+  }
+  /** The split vertex at `p` whose normal best faces the same way as `n`. */
+  const pickVariant = (p, n) => {
+    const list = variantsOf[p];
+    if (list.length === 1) return list[0];
+    let best = list[0], bestDot = -2;
+    for (const v of list) {
+      const d = wNrm[v * 3] * n[0] + wNrm[v * 3 + 1] * n[1] + wNrm[v * 3 + 2] * n[2];
+      if (d > bestDot) { bestDot = d; best = v; }
+    }
+    return best;
+  };
+
   const finalIndex = [];
   const finalGroups = [];
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi];
     const sub = new Uint32Array(g.count);
-    for (let i = 0; i < g.count; i++) sub[i] = weldMap[indices[g.start + i]];
+    for (let i = 0; i < g.count; i++) {
+      const w = weldMap[indices[g.start + i]];
+      sub[i] = byPosition ? posOf[w] : w;
+    }
     const target = Math.min(sub.length, (BUDGET[g.name] ?? 1500) * 3);
-    const simplified = MeshoptSimplifier.simplify(sub, wPos, 3, target - (target % 3), 0.02, ['LockBorder']);
+    // `LockBorder` and the error ceiling are per character, because what they
+    // protect against is not the same in every file.
+    //
+    // On a pack mesh they are right: borders are where a kilt meets a leg, and
+    // collapsing one tears a hole. On a mesh generated from an image they are a
+    // trap -- Bulwark welds to 466k vertices for 500k triangles, so roughly
+    // half of them are split along UV seams, which makes almost every edge an
+    // open border and locks the simplifier out of its own job. It honoured a
+    // budget of 7,000 by returning 173,370.
+    const opts = character.simplify ?? {};
+    const flags = opts.lockBorder === false ? [] : ['LockBorder'];
+    const simplified = MeshoptSimplifier.simplify(
+      sub, pPos, 3, target - (target % 3), opts.error ?? 0.02, flags);
     const kept = simplified[0];
     const start = finalIndex.length;
-    for (const v of kept) finalIndex.push(v);
+    if (byPosition) {
+      // Back to split vertices, one triangle at a time, each corner taking the
+      // normal that belongs to the face it is now part of.
+      const n = [0, 0, 0];
+      for (let i = 0; i < kept.length; i += 3) {
+        const a = kept[i], b = kept[i + 1], c = kept[i + 2];
+        const ax = pPos[a * 3], ay = pPos[a * 3 + 1], az = pPos[a * 3 + 2];
+        const ux = pPos[b * 3] - ax, uy = pPos[b * 3 + 1] - ay, uz = pPos[b * 3 + 2] - az;
+        const vx = pPos[c * 3] - ax, vy = pPos[c * 3 + 1] - ay, vz = pPos[c * 3 + 2] - az;
+        n[0] = uy * vz - uz * vy; n[1] = uz * vx - ux * vz; n[2] = ux * vy - uy * vx;
+        const len = Math.hypot(n[0], n[1], n[2]) || 1;
+        n[0] /= len; n[1] /= len; n[2] /= len;
+        finalIndex.push(pickVariant(a, n), pickVariant(b, n), pickVariant(c, n));
+      }
+    } else {
+      for (const v of kept) finalIndex.push(v);
+    }
     finalGroups.push({ name: g.name, start, count: kept.length });
     say(`decimate:${g.name}`, `${g.count / 3} -> ${kept.length / 3} tri`);
   }
@@ -928,9 +1132,20 @@ const inPage = async (character) => {
     // drive, and the list is deliberately about locomotion and reach rather
     // than about detail: no fingers, no jaw, no cloth.
     const CORE = /(hips?|spined*$|spine$|neck|head$|shoulder|upperarm|upleg|thigh|(^|[^a-z])arm|forearm|hand$|leg$|calf|foot$|ankle|toebase|pelvis)/i;
+    // Per character, for bones that drive nothing but still have to be there.
+    //
+    // Bulwark needs his fingers for exactly that reason. The rule above is
+    // right for a creep: at 79 pixels a finger is detail and detail costs. But
+    // a hero carries a weapon, and the clips that came with him leave the
+    // fingers dead straight -- the middle finger measures a tip-to-knuckle
+    // ratio of 0.96. Curling them is the only thing that turns a hand resting
+    // against a haft into a hand holding one, and a bone that has been deleted
+    // cannot be curled.
+    const ALSO = character.alsoKeepBones ? new RegExp(character.alsoKeepBones, 'i') : null;
     const keptNames = new Set();
     for (let i = 0; i < bones.length; i++) {
-      if (drives[i] < KEEP_AT && !CORE.test(bones[i].name)) continue;
+      const forced = CORE.test(bones[i].name) || (ALSO && ALSO.test(bones[i].name));
+      if (drives[i] < KEEP_AT && !forced) continue;
       keptNames.add(bones[i].name);
       for (let n = bones[i].parent; n; n = n.parent) {
         if (slotOf.has(n.name)) keptNames.add(n.name);
@@ -1063,6 +1278,24 @@ const inPage = async (character) => {
     root.traverse(() => after++);
     root.updateMatrixWorld(true);
     say('nodes', `${before} -> ${after}`);
+  }
+
+  // ── 8b. Stand the character up ────────────────────────────────────
+  //
+  // glTF is Y-up and this export is not. Measured on the skeleton rather than
+  // the bounding box, because a box cannot tell a tall character from a long
+  // one: CC_Base_Head sits at Z=149.2 and CC_Base_L_Foot at Z=9.0, three units
+  // apart in Y. The file is Z-up, so in the game Bulwark would lie on his back.
+  //
+  // Rotating the root is enough, and it is safe precisely because it is the
+  // root: the mesh and the whole skeleton hang off it, so bones, bind matrices
+  // and every clip turn together and nothing has to be re-bound.
+  //
+  // Per character, because the downloaded packs are already Y-up.
+  if (character.upAxis === 'Z') {
+    root.rotation.x = -Math.PI / 2;
+    root.updateMatrixWorld(true);
+    say('upAxis', 'Z -> Y, root rotated -90 deg about X');
   }
 
   // ── 9. Write the GLB ──────────────────────────────────────────────────────

@@ -1073,3 +1073,61 @@ lettering, no logos. Shallow depth: it reads as a backdrop, not as a scene to
 look into. Output 1024x256 PNG.
 Subject: a dark vaulted undercroft: a low brazier of violet flame at the centre, hanging chains, a table of stoppered vials and foul reagents, cold violet rim light on wet stone.
 ```
+
+---
+
+## Invocaciones del jugador - 256 x 256, PNG con alfa
+
+Dos botones cuadrados bajo el oro. Son poderes del JUGADOR, no del heroe, asi
+que conviene que no se parezcan a un icono de habilidad de la barra: menos
+organico, mas de simbolo o artefacto.
+
+### `icon_invoke_stop_time.png`
+
+_Parar el tiempo - congela 60 s a los enemigos de tu linea_
+
+```
+Stylised dark-fantasy game art. Chunky, exaggerated, readable proportions:
+oversized shoulders, weapons and heads; heavy boots; strong tapering toward the
+waist. Hand-painted look with visible brush structure, NOT photorealism and NOT
+smooth 3D render. Mid-saturation palette - colour comes from lighting, so keep
+albedo restrained. Clear silhouette readable at a glance from a top-down camera
+40 metres away. Neutral frontal lighting, no cast shadows, no ground plane, no
+background scenery. Transparent background.
+Original character design. Do not imitate, reference or resemble any existing
+game franchise, in particular Warcraft, World of Warcraft, Dota or League of
+Legends. No copyrighted logos, insignia or trade dress.
+Single centred icon on transparent background. Bold simple symbol, readable
+when scaled down to 40 pixels. No frame, no border, no text, no lettering.
+Flat 2D icon illustration, not a 3D render, not a photograph.
+Output 256x256 PNG with a real alpha channel.
+Subject: an ornate hourglass whose falling sand has frozen into a column of pale
+blue ice in mid-air, a few grains held motionless around it, the frame of the
+glass rimed with frost. Cold pale blue and tarnished brass. It must read as
+time arrested, not as time running out.
+```
+
+### `icon_invoke_true_sight.png`
+
+_Ver lo invisible - revela 45 s a las criaturas ocultas_
+
+```
+Stylised dark-fantasy game art. Chunky, exaggerated, readable proportions:
+oversized shoulders, weapons and heads; heavy boots; strong tapering toward the
+waist. Hand-painted look with visible brush structure, NOT photorealism and NOT
+smooth 3D render. Mid-saturation palette - colour comes from lighting, so keep
+albedo restrained. Clear silhouette readable at a glance from a top-down camera
+40 metres away. Neutral frontal lighting, no cast shadows, no ground plane, no
+background scenery. Transparent background.
+Original character design. Do not imitate, reference or resemble any existing
+game franchise, in particular Warcraft, World of Warcraft, Dota or League of
+Legends. No copyrighted logos, insignia or trade dress.
+Single centred icon on transparent background. Bold simple symbol, readable
+when scaled down to 40 pixels. No frame, no border, no text, no lettering.
+Flat 2D icon illustration, not a 3D render, not a photograph.
+Output 256x256 PNG with a real alpha channel.
+Subject: a single wide-open eye set inside a ring of small engraved runes, a
+thin violet beam opening forward from the pupil and a faint ghostly silhouette
+dissolving into view where the beam lands. Violet and cold bone white. It must
+read as seeing what is hidden, not as a generic eye.
+```
