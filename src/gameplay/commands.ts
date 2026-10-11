@@ -21,6 +21,7 @@ import type { AbilityModule, AbilityTarget } from './abilities';
 import type { MatchModule } from './match';
 import { heroOrders, issueOrder } from './movement';
 import type { AttributeId, ProgressionModule } from './progression';
+import { isInvocationId, type InvocationId, type InvocationModule } from './invocations';
 
 export type Command =
   | { kind: 'move'; pos: Vec2 }
@@ -30,7 +31,15 @@ export type Command =
   | { kind: 'cast'; index: number; target: AbilityTarget }
   | { kind: 'buy'; itemId: string }
   | { kind: 'use'; itemId: string }
+  // Handing things to a team-mate. Gold travels any distance; an item does
+  // not, and lands on the ground if the recipient has no room -- see
+  // `EconomyModule.giveItem`.
+  | { kind: 'giveGold'; toId: EntityId; amount: number }
+  | { kind: 'giveItem'; toId: EntityId; itemId: string }
+  | { kind: 'pickUp'; dropId: number }
   | { kind: 'attribute'; attribute: AttributeId }
+  /** A player power: `Parar el tiempo`, `Ver lo invisible`. */
+  | { kind: 'invoke'; id: InvocationId }
   /** The player left or surrendered. Online, the server issues it on a disconnect. */
   | { kind: 'forfeit' };
 
@@ -86,6 +95,22 @@ export function sanitizeCommand(raw: unknown): Command | null {
     case 'buy':
     case 'use':
       return shortString(c.itemId) ? { kind: c.kind, itemId: c.itemId } : null;
+    case 'giveGold': {
+      // Clamped to a sane integer here rather than trusted: this arrives over
+      // the wire and a negative amount would turn a gift into a theft.
+      const amount = Math.floor(Number(c.amount));
+      return Number.isInteger(c.toId) && Number.isFinite(amount) && amount > 0
+        ? { kind: 'giveGold', toId: c.toId as number, amount: Math.min(amount, 1e6) }
+        : null;
+    }
+    case 'giveItem':
+      return Number.isInteger(c.toId) && shortString(c.itemId)
+        ? { kind: 'giveItem', toId: c.toId as number, itemId: c.itemId }
+        : null;
+    case 'pickUp':
+      return Number.isInteger(c.dropId) ? { kind: 'pickUp', dropId: c.dropId as number } : null;
+    case 'invoke':
+      return isInvocationId(c.id) ? { kind: 'invoke', id: c.id } : null;
     case 'attribute':
       return ATTRIBUTES.includes(c.attribute as AttributeId)
         ? { kind: 'attribute', attribute: c.attribute as AttributeId }
@@ -107,6 +132,7 @@ export class CommandModule implements GameModule {
     private readonly abilities: AbilityModule,
     private readonly economy: EconomyModule,
     private readonly progression: ProgressionModule,
+    private readonly invocations: InvocationModule,
   ) {}
 
   init(ctx: GameContext): void {
@@ -171,6 +197,18 @@ export class CommandModule implements GameModule {
         return;
       case 'use':
         this.report(hero.id, this.economy.useItem(hero.id, cmd.itemId));
+        return;
+      case 'giveGold':
+        this.report(hero.id, this.economy.giveGold(hero.id, cmd.toId, cmd.amount));
+        return;
+      case 'giveItem':
+        this.report(hero.id, this.economy.giveItem(hero.id, cmd.toId, cmd.itemId));
+        return;
+      case 'pickUp':
+        this.report(hero.id, this.economy.pickUp(hero.id, cmd.dropId));
+        return;
+      case 'invoke':
+        this.report(hero.id, this.invocations.invoke(hero.id, cmd.id));
         return;
       case 'attribute':
         this.progression.spend(hero.id, cmd.attribute);

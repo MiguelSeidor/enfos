@@ -18,6 +18,7 @@ import { EconomyModule } from '@/economy/economy';
 import { ProgressionModule } from './progression';
 import { CommandModule } from './commands';
 import { SabotageModule } from './sabotage';
+import { InvocationModule } from './invocations';
 import { LANE_COUNT } from '@/world/layout';
 import type { MatchSetup } from './setup';
 
@@ -33,6 +34,8 @@ export interface GameplayBundle {
   progression: ProgressionModule;
   /** Exposed for the command card's stop/hold orders. */
   movement: MovementModule;
+  /** Player powers, read by the HUD and fired by a command. */
+  invocations: InvocationModule;
 }
 
 export function createGameplay(setup: MatchSetup): GameplayBundle {
@@ -43,8 +46,9 @@ export function createGameplay(setup: MatchSetup): GameplayBundle {
   const abilities = new AbilityModule();
   const economy = new EconomyModule();
   const progression = new ProgressionModule();
+  const invocations = new InvocationModule();
   const match = new MatchModule(units, combat, movement, waves, setup);
-  const commands = new CommandModule(match, abilities, economy, progression);
+  const commands = new CommandModule(match, abilities, economy, progression, invocations);
   const sabotage = new SabotageModule(match, units, combat);
   sabotage.laneCount = LANE_COUNT;
   economy.sabotage = sabotage;
@@ -52,7 +56,9 @@ export function createGameplay(setup: MatchSetup): GameplayBundle {
   return {
     // Economy (600) and progression (610) init after match (550), so the hero
     // they credit already exists.
-    modules: [units, combat, movement, abilities, waves, match, economy, progression, sabotage, commands],
+    // `invocations` after economy (600), because it charges gold through the
+    // economy service and so needs it registered.
+    modules: [units, combat, movement, abilities, waves, match, economy, progression, invocations, sabotage, commands],
     commands,
     sabotage,
     match,
@@ -61,14 +67,32 @@ export function createGameplay(setup: MatchSetup): GameplayBundle {
     economy,
     progression,
     movement,
+    invocations,
   };
 }
 
-export { WAVES_TOTAL, INTERMISSION, planWave } from './waves';
+export { WAVES_TOTAL, INTERMISSION, intermissionFor, planWave } from './waves';
+export { INVOCATIONS, INVOCATION_IDS, type InvocationId, type InvocationStatus } from './invocations';
 export { xpToNext, teamSign } from './match';
-export { soloSetup, teamsOf, type MatchSetup, type PlayerSetup, type MatchMode } from './setup';
+export {
+  soloSetup,
+  duoSetup,
+  teamsOf,
+  type MatchSetup,
+  type PlayerSetup,
+  type MatchMode,
+} from './setup';
 export { sanitizeCommand, type Command, type SlotCommand } from './commands';
 export { issueOrder, heroOrders, clearOrders } from './movement';
 export { HEROES, ENEMIES, BOSSES } from './defs';
-export { ABILITIES, AbilityModule, type AbilityDef, type AbilityTarget } from './abilities';
+export {
+  ABILITIES,
+  AbilityModule,
+  abilityRadius,
+  abilityRange,
+  grown,
+  type AbilityDef,
+  type AbilityGrowth,
+  type AbilityTarget,
+} from './abilities';
 export { ATTRIBUTES, ProgressionModule, type AttributeId } from './progression';

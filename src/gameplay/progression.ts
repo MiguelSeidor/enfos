@@ -21,7 +21,7 @@
 import type { EntityId, GameContext, GameModule, HeroState, StatModifier } from '@/core/contracts';
 import { CombatKey, type CombatService } from '@/core/services';
 
-export type AttributeId = 'power' | 'vitality' | 'focus';
+export type AttributeId = 'power' | 'vitality' | 'focus' | 'reach';
 
 export interface AttributeDef {
   id: AttributeId;
@@ -50,6 +50,21 @@ export const ATTRIBUTES: AttributeDef[] = [
     ],
   },
   {
+    id: 'reach',
+    name: 'Destreza',
+    description: '+6 % velocidad de ataque, +8 % alcance (con tope)',
+    modifiers: [
+      { stat: 'attackSpeed', op: 'pct', value: 0.06, sourceId: 'attr.reach' },
+      // A percentage, not a flat metre, and that is the whole design. The same
+      // point gives a melee hero with 3 m of reach about 24 cm and Talon with
+      // 12 m about one metre: the melee crawls toward being able to hit a creep
+      // that is a step away, and the marksman buys the room not to be stood on.
+      // A flat bonus would do the opposite, mattering hugely to the short reach
+      // and nothing to the long one.
+      { stat: 'attackRange', op: 'pct', value: 0.08, sourceId: 'attr.reach' },
+    ],
+  },
+  {
     id: 'focus',
     name: 'Concentración',
     description: '+35 maná máximo, +1,2 regeneración de maná',
@@ -69,6 +84,13 @@ export const ATTRIBUTES: AttributeDef[] = [
  */
 const POINTS_PER_LEVEL = 1;
 const MILESTONE_BONUS = 2;
+
+/** A fresh zeroed tally, derived from the list so it cannot fall behind it. */
+function emptyTally(): Record<AttributeId, number> {
+  const out = {} as Record<AttributeId, number>;
+  for (const a of ATTRIBUTES) out[a.id] = 0;
+  return out;
+}
 
 export class ProgressionModule implements GameModule {
   readonly id = 'progression';
@@ -102,7 +124,7 @@ export class ProgressionModule implements GameModule {
   }
 
   allocated(heroId: EntityId): Record<AttributeId, number> {
-    return this.spent.get(heroId) ?? { power: 0, vitality: 0, focus: 0 };
+    return this.spent.get(heroId) ?? emptyTally();
   }
 
   /**
@@ -120,7 +142,7 @@ export class ProgressionModule implements GameModule {
     if (!def) return false;
 
     this.points.set(heroId, available - 1);
-    const tally = this.spent.get(heroId) ?? { power: 0, vitality: 0, focus: 0 };
+    const tally = this.spent.get(heroId) ?? emptyTally();
     tally[attribute]++;
     this.spent.set(heroId, tally);
 

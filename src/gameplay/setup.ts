@@ -39,6 +39,33 @@ export function soloSetup(heroKey: string, seed: number): MatchSetup {
   };
 }
 
+/**
+ * A 2v2 on one machine, with nobody at the other three seats.
+ *
+ * Reached with `?duo=1`, beside `?stats=1`. The parts of the HUD that only
+ * exist when you have a team-mate — the ally card, handing over gold, dropping
+ * an item at their feet — otherwise need the match server and four browser
+ * windows to look at, which is too much ceremony to check a panel's position.
+ *
+ * The other three heroes stand still: no AI drives them, and none is wanted.
+ * This is for looking at the interface, not for playing a match.
+ */
+export function duoSetup(heroKey: string, seed: number): MatchSetup {
+  const mate = heroKey === 'talon' ? 'bulwark' : 'talon';
+  return {
+    seed,
+    mode: '2v2',
+    players: [
+      { slot: 0, team: 0, heroKey, name: 'Jugador' },
+      { slot: 1, team: 0, heroKey: mate, name: 'Compañero' },
+      { slot: 2, team: 1, heroKey: 'vesper', name: 'Rival' },
+      { slot: 3, team: 1, heroKey: 'oracle', name: 'Rival' },
+    ],
+    localSlot: 0,
+    online: false,
+  };
+}
+
 /** Distinct teams in slot order. */
 export function teamsOf(setup: MatchSetup): TeamId[] {
   const teams: TeamId[] = [];

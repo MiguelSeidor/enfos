@@ -49,6 +49,22 @@ export class AuthoredView {
   /** Metres per second each locomotion clip was authored for. */
   private readonly paceOf = new Map<ClipId, number>();
   private readonly rootRest = new THREE.Vector3();
+  /**
+   * Bones turned a fixed amount after every clip tick.
+   *
+   * It has to be after: the mixer writes these bones from the clip each
+   * frame, so anything set once at load is gone by the next one. Resolved
+   * against THIS view's own cloned skeleton, not the shared source.
+   */
+  private readonly nudges: {
+    bone: THREE.Bone;
+    q: THREE.Quaternion;
+    /** What the clip wrote, before the nudge went on. */
+    base: THREE.Quaternion;
+    /** What was left on the bone afterwards, to spot a frame the mixer skipped. */
+    last: THREE.Quaternion;
+    seen: boolean;
+  }[] = [];
 
   constructor(source: AuthoredCharacter, scale = 1, phase = 0) {
     // `SkeletonUtils.clone` is required rather than `Object3D.clone`: it rebuilds
@@ -76,6 +92,24 @@ export class AuthoredView {
       s.boundingSphere = s.geometry.boundingSphere!.clone();
       s.boundingSphere.radius *= 3.5;
     });
+
+    for (const n of source.boneNudges ?? []) {
+      let bone: THREE.Bone | null = null;
+      root.traverse((o: THREE.Object3D) => {
+        if (!bone && (o as THREE.Bone).isBone && o.name === n.bone) bone = o as THREE.Bone;
+      });
+      if (!bone) continue;
+      this.nudges.push({
+        bone,
+        q: new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(n.axis[0], n.axis[1], n.axis[2]).normalize(),
+          n.angle,
+        ),
+        base: new THREE.Quaternion(),
+        last: new THREE.Quaternion(),
+        seen: false,
+      });
+    }
 
     this.mixer = new THREE.AnimationMixer(root);
     for (const [id, clip] of source.clips) {
@@ -194,7 +228,66 @@ export class AuthoredView {
     // Track values are in the character's own units; the group carries the
     // scale that turns those into metres.
     const span = Math.hypot(maxX - minX, maxZ - minZ) * this.worldScale;
-    return span / clip.duration;
+    if (span > 1e-4) return span / clip.duration;
+    // No travel in the track at all: fall through to the feet.
+    return this.paceFromStride(clip);
+  }
+
+  /**
+   * The same number, for a clip whose root never moves, from its stride.
+   *
+   * ActorCore's locomotion ships genuinely in place: Bulwark's walk has a hip
+   * travel of exactly zero AND a planted foot that does not slide, so there
+   * is no ground speed recorded anywhere in it. Following the planted foot --
+   * the obvious idea, and the first one tried -- returns 0.014 m/s, which is
+   * nothing.
+   *
+   * What the clip does contain is a stride and a cadence, and those give the
+   * speed the walk would have if it were travelling: how far apart the feet
+   * get, divided by how long a step takes. The step count comes from how many
+   * times the planted foot changes.
+   */
+  private paceFromStride(clip: THREE.AnimationClip): number {
+    const root = this.mixer?.getRoot?.() as THREE.Object3D | undefined;
+    if (!root || clip.duration <= 0) return 0;
+    const feet: THREE.Object3D[] = [];
+    root.traverse((o: THREE.Object3D) => {
+      if (/(_L_Foot|_R_Foot|LeftFoot|RightFoot)$/i.test(o.name)) feet.push(o);
+    });
+    if (feet.length !== 2) return 0;
+
+    const probe = new THREE.AnimationMixer(root);
+    const action = probe.clipAction(clip);
+    action.reset();
+    action.play();
+
+    const STEPS = 60;
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    let widest = 0;
+    let swaps = 0;
+    let planted: 0 | 1 | -1 = -1;
+    for (let i = 0; i <= STEPS; i++) {
+      probe.setTime((i / STEPS) * clip.duration);
+      root.updateMatrixWorld(true);
+      feet[0]!.getWorldPosition(a);
+      feet[1]!.getWorldPosition(b);
+      const apart = Math.hypot(a.x - b.x, a.z - b.z);
+      if (apart > widest) widest = apart;
+      const low: 0 | 1 = a.y <= b.y ? 0 : 1;
+      if (planted !== -1 && low !== planted) swaps++;
+      planted = low;
+    }
+    action.stop();
+    probe.uncacheClip(clip);
+
+    if (swaps < 1 || widest <= 0) return 0;
+    // No `worldScale` here, unlike the track version above. Track values are
+    // raw file units; these are world positions of bones that already hang
+    // off the scaled group, so they are metres. Applying the scale a second
+    // time reported a walk of 0.02 m/s.
+    const perStep = clip.duration / swaps;
+    return widest / perStep;
   }
 
   /**
@@ -220,6 +313,17 @@ export class AuthoredView {
 
   update(dt: number): void {
     this.mixer.update(dt);
+    for (const n of this.nudges) {
+      // Only ever applied to what the CLIP wrote. A finished, clamped action
+      // stops driving its bones, and multiplying onto the previous frame's
+      // result then compounds every frame -- which is a shield that keeps
+      // turning on a corpse, exactly what the owner saw after a death.
+      if (n.seen && n.bone.quaternion.equals(n.last)) n.bone.quaternion.copy(n.base);
+      n.base.copy(n.bone.quaternion);
+      n.bone.quaternion.multiply(n.q);
+      n.last.copy(n.bone.quaternion);
+      n.seen = true;
+    }
     if (this.remaining !== Infinity) {
       this.remaining -= dt;
       if (this.remaining <= 0) this.animator.isFinished = true;

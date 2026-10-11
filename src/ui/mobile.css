@@ -258,7 +258,7 @@
     height: 150px;
   }
 
-  .hud-core {
+  .hud-left {
     top: calc(0.9rem + env(safe-area-inset-top));
     left: calc(0.9rem + env(safe-area-inset-left));
   }
@@ -271,6 +271,7 @@
     top: calc(0.9rem + env(safe-area-inset-top));
     right: calc(0.9rem + env(safe-area-inset-right));
   }
+
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -532,9 +533,13 @@
 
   /* ── Top chrome ────────────────────────────────────────────────────── */
 
-  .hud-core {
+  .hud-left {
     top: calc(5px + env(safe-area-inset-top));
     left: calc(6px + env(safe-area-inset-left));
+    gap: 4px;
+  }
+
+  .hud-core {
     min-width: 0;
     width: 128px;
     padding: 4px 8px 5px;
@@ -578,6 +583,24 @@
     top: calc(5px + env(safe-area-inset-top));
     right: calc(6px + env(safe-area-inset-right));
     gap: 5px;
+  }
+
+  /* Landscape on a phone has 390 px of height, so the card keeps only the
+     portrait, the name and the bar, tucked under the Core pips. */
+  .ally {
+    min-width: 0;
+    gap: 6px;
+    padding: 4px 5px;
+  }
+
+  .ally-portrait {
+    width: 30px;
+    height: 30px;
+  }
+
+  .ally-gold {
+    width: 26px;
+    height: 26px;
   }
 
   .res {
@@ -833,9 +856,11 @@
   .hud-box,
   .hud-rail,
   .hud-tray,
+  .hud-left,
   .hud-core,
   .hud-wave,
   .hud-resources,
+  .hud-allies,
   .pause-button,
   .surrender-button {
     touch-action: none;

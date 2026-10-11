@@ -46,6 +46,23 @@ export interface CellQuery {
   gorge: number;
 }
 
+/**
+ * Inside a building, as opposed to inside its pad.
+ *
+ * Mirrored in x, like `landmarkDistance`: the map is symmetric and the
+ * landmark table holds one side of it.
+ */
+function insideSolid(x: number, z: number): boolean {
+  const u = Math.abs(x);
+  for (const l of LANDMARKS) {
+    if (!l.solid) continue;
+    const dx = u - l.u;
+    const dz = z - l.v;
+    if (dx * dx + dz * dz < l.solid * l.solid) return true;
+  }
+  return false;
+}
+
 export class TerrainFieldData {
   /** Quantised level per coarse cell. */
   readonly level = new Int8Array(CELLS * CELLS);
@@ -240,7 +257,13 @@ export class TerrainFieldData {
         // a creep pack while leaving highland between the shelf and the lane.
         const onRoute = this.carveMask[c] > 0.55;
         const onBase = inBaseTerrace(x, z);
-        this.walkable[c] = inPlay && lvl >= 0 && lvl <= 4 && (onRoute || onBase) ? 1 : 0;
+        // And nothing walks through a building. Until now the Core, the
+        // fountain and both shops were scenery a unit passed straight
+        // through, because the only thing standing between a unit and a prop
+        // was the prop's own pad being walkable -- which it has to be, or
+        // nobody could reach the shop counter.
+        const solid = insideSolid(x, z);
+        this.walkable[c] = !solid && inPlay && lvl >= 0 && lvl <= 4 && (onRoute || onBase) ? 1 : 0;
       }
     }
   }

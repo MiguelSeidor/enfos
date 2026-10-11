@@ -35,7 +35,8 @@ import {
 } from '@/core/services';
 import { angleTo, dist, dist2, rotateToward } from '@/core/mathx';
 import { MAP_HALF } from '@/world/layout';
-import { runtimeOf, type UnitRuntime } from './units';
+import { isFrozen, runtimeOf, type UnitRuntime } from './units';
+import { SUMMON_CAP } from './waves';
 import { PathFinder } from './pathfinding';
 import type { CombatModule } from './combat';
 import { cos, hypot, sin } from '@/core/detmath';
@@ -71,6 +72,14 @@ const MAX_SLOPE = 0.55;
  * that the hero abandons the march for something across the map.
  */
 const ATTACK_MOVE_RANGE = 15;
+
+/**
+ * How close a creep has to get to the Core to leak, in metres.
+ *
+ * The Core's solid radius plus a stride: it has to sit outside the shell the
+ * creep is now stopped by, or nothing ever arrives.
+ */
+const CORE_LEAK_RANGE = 6.5;
 
 export class MovementModule implements GameModule {
   readonly id = 'movement';
@@ -177,6 +186,16 @@ export class MovementModule implements GameModule {
         continue;
       }
 
+      // Held by `Parar el tiempo` on the site this creep marches against. Same
+      // shape as the stun above and deliberately so: stopping time is a stun
+      // with a different author, and reusing the path means nothing downstream
+      // has to learn a second way for a unit to be inert.
+      if (isFrozen(unit.id, tick)) {
+        unit.vel.x = 0;
+        unit.vel.z = 0;
+        continue;
+      }
+
       if (unit.kind === UnitKind.Hero) {
         this.stepHero(unit, step);
         continue;
@@ -208,9 +227,14 @@ export class MovementModule implements GameModule {
       // defang it and the trait would stop mattering after one exchange.
       const alive = (runtime.summoned ?? []).filter((id) => this.units.get(id)?.alive);
       runtime.summoned = alive;
-      if (alive.length >= traits.summons.maxAlive) return;
+      const scale = Math.max(1, runtime.summonScale ?? 1);
+      // Capped: see SUMMON_CAP in `waves.ts`. The scale still shortens the gap
+      // between raisings and refills the brood the instant it is thinned, which
+      // is what a player feels; an uncapped cap is just more bodies to draw.
+      const maxAlive = Math.min(SUMMON_CAP, Math.round(traits.summons.maxAlive * scale));
+      if (alive.length >= maxAlive) return;
 
-      const room = Math.min(traits.summons.count, traits.summons.maxAlive - alive.length);
+      const room = Math.min(Math.round(traits.summons.count * scale), maxAlive - alive.length);
       for (let i = 0; i < room; i++) {
         const a = (i / room) * Math.PI * 2 + runtime.age;
         const id = this.onSummon?.(
@@ -299,6 +323,19 @@ export class MovementModule implements GameModule {
     //
     // Flight still means something: `sight.ts` puts the creature's eye above
     // the ridges and `unitView` hovers it. It just no longer cuts the corner.
+    // Close enough to the Core is a leak, whatever the lane says.
+    //
+    // This used to live below, reachable only after the unit had consumed
+    // every waypoint. That worked while the Core was walkable and the last
+    // waypoints sat on top of it. Once its footprint became solid the pack
+    // could not stand on those waypoints, never advanced past them, and so
+    // milled around four metres from the Core forever with the lives bar
+    // untouched: a wave that cannot lose the game is not a wave.
+    if (dist2(unit.pos, core) < CORE_LEAK_RANGE * CORE_LEAK_RANGE) {
+      this.onLeak?.(unit);
+      return null;
+    }
+
     const lane = rt.lane;
     if (lane.length === 0) return core;
 
@@ -307,10 +344,6 @@ export class MovementModule implements GameModule {
     }
     if (rt.laneIndex >= lane.length) {
       // Past the last waypoint: head for the Core itself, then leak.
-      if (dist2(unit.pos, core) < 9) {
-        this.onLeak?.(unit);
-        return null;
-      }
       return core;
     }
     return lane[rt.laneIndex]!;

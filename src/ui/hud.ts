@@ -31,8 +31,9 @@ import {
   type RenderService,
   type UiService,
 } from '@/core/services';
-import { drawCrest, icon, type IconId } from './icons';
+import { drawCrest, glyph as glyphFor, heroPortrait, icon, type IconId } from './icons';
 import { Minimap, type MinimapCallbacks } from './minimap';
+import type { AttributeId, InvocationStatus } from '@/gameplay';
 import { WorldHud } from './worldHud';
 import { LABELLED_LANDMARKS } from '@/world';
 import { landmark, type LandmarkKind } from '@/world/layout';
@@ -52,6 +53,8 @@ export interface AbilitySlot {
   key: string;
   name: string;
   icon: IconId;
+  /** Ability id, for the painted plate. Falls back to `icon` without it. */
+  art?: string;
   cooldown: number;
   cooldownLeft: number;
 }
@@ -59,6 +62,17 @@ export interface AbilitySlot {
 /** Everything the HUD draws. Gameplay owns the values; the HUD only reads. */
 export interface HudModel {
   heroName: string;
+  /**
+   * Player powers, drawn under the purse. Not hero abilities: every hero has
+   * the same two, they cost gold rather than mana, and their cooldown is a
+   * countdown the player watches rather than a bar on a kit.
+   */
+  invocations: InvocationStatus[];
+  /**
+   * The hero's def id, for the painted portrait. The box used to draw a crest
+   * from hardcoded colours and never knew which hero it belonged to.
+   */
+  heroArt?: string;
   level: number;
   health: number;
   maxHealth: number;
@@ -77,6 +91,20 @@ export interface HudModel {
   abilities: AbilitySlot[];
   /** Seconds until the downed hero returns, or -1 while alive. */
   reviveCountdown: number;
+  /**
+   * Team-mates, for the panel that lets you hand them things.
+   *
+   * Empty in a one-player match, which is why the panel hides itself rather
+   * than reserving a corner: most matches have nobody to give anything to.
+   */
+  allies: { id: number; name: string; art?: string; health: number; maxHealth: number; alive: boolean }[];
+  /**
+   * Items lying on the field that this team may pick up.
+   *
+   * Carried in the model rather than read from the economy, because the HUD
+   * reads a model and nothing else — see the note at the top of this file.
+   */
+  drops: { id: number; name: string; pos: Vec2; inRange: boolean }[];
   /** Items owned, in inventory-slot order. */
   inventory: { name: string; icon: IconId; count: number; itemId: string }[];
   /** What the fourth box shows: the hero's orders, or a shop's stock. */
@@ -115,7 +143,12 @@ export interface HudModel {
     moveSpeed: number;
   };
   /** Points spent per attribute, not the derived bonuses. */
-  attributes: { power: number; vitality: number; focus: number };
+  /**
+   * Typed from the attribute list rather than spelled out, so a new attribute
+   * cannot be added to the game and silently missed here. Adding the fourth
+   * needed four separate edits before this.
+   */
+  attributes: Record<AttributeId, number>;
   /** Unspent attribute points. */
   attributePoints: number;
 }
@@ -123,6 +156,8 @@ export interface HudModel {
 export function createHudModel(): HudModel {
   return {
     heroName: '—',
+    invocations: [],
+    heroArt: undefined,
     level: 1,
     health: 1,
     maxHealth: 1,
@@ -139,6 +174,8 @@ export function createHudModel(): HudModel {
     coreMaxLives: 1,
     abilities: [],
     reviveCountdown: -1,
+    allies: [],
+    drops: [],
     inventory: [],
     command: { title: 'Órdenes', slots: [] },
     defeated: false,
@@ -148,7 +185,7 @@ export function createHudModel(): HudModel {
     sabotage: [],
     stats: { attackDamage: 0, attackSpeed: 0, armor: 0, spellPower: 0, moveSpeed: 0 },
     statBonus: { attackDamage: 0, attackSpeed: 0, armor: 0, spellPower: 0, moveSpeed: 0 },
-    attributes: { power: 0, vitality: 0, focus: 0 },
+    attributes: { power: 0, vitality: 0, focus: 0, reach: 0 },
     attributePoints: 0,
   };
 }
@@ -235,6 +272,12 @@ export interface CommandSlot {
   kind: 'ability' | 'order' | 'levelup' | 'item';
   label: string;
   icon: IconId;
+  /**
+   * The ability's or item's own id, which `id` cannot stand in for: it is
+   * `ability.0` here because the ability module is index-based, and `buy.x`
+   * for a shop row. Absent on orders and level-ups, which have no painted art.
+   */
+  art?: string;
   tooltip?: string;
   hotkey?: string;
   /** Ability cooldowns; both omitted for orders and items. */
@@ -364,6 +407,19 @@ const TRAYS: { state: TrayState; label: string; glyph: string }[] = [
   },
 ];
 
+/**
+ * Two stacked coins, for the button that hands gold to a team-mate.
+ *
+ * Written here rather than in icons.ts for the reason given above `TRAYS`:
+ * that module is the game's `IconId`-indexed set, used by abilities and items,
+ * and this is HUD chrome no ability can ever legitimately reference.
+ */
+const COIN_GLYPH =
+  '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">' +
+  '<ellipse cx="12" cy="8" rx="7" ry="3.4" fill="currentColor" opacity="0.55"/>' +
+  '<path fill="currentColor" d="M5 8v3.2c0 1.9 3.1 3.4 7 3.4s7-1.5 7-3.4V8c0 1.9-3.1 3.4-7 3.4' +
+  'S5 9.9 5 8Zm0 5.6v3.2c0 1.9 3.1 3.4 7 3.4s7-1.5 7-3.4v-3.2c0 1.9-3.1 3.4-7 3.4s-7-1.5-7-3.4Z"/></svg>';
+
 export class Hud {
   readonly root: HTMLElement;
   private readonly waveValue: TextCell;
@@ -371,6 +427,8 @@ export class Hud {
   private readonly goldValue: TextCell;
   private readonly influenceValue: TextCell;
   private readonly heroName: NameCell;
+  private portraitArt!: HTMLImageElement;
+  private portraitArtFor = '';
   private readonly levelValue: TextCell;
   private readonly healthBar: BarCell;
   private readonly manaBar: BarCell;
@@ -380,10 +438,38 @@ export class Hud {
   private readonly commandEl: HTMLElement;
   private readonly commandTitle: TextCell;
   private readonly inventoryEl: HTMLElement;
-  /** Item ids currently shown, by slot, so a click knows what it used. */
-  private renderedInventoryItems: ({ itemId: string } | null)[] = [];
+  /**
+   * What each slot currently holds, so a click knows what it used and a drag
+   * knows what it carries.
+   *
+   * Every filled slot is recorded, not only the drinkable ones: gear cannot be
+   * clicked but it can be handed over, and the earlier version stored `null`
+   * for it, which made a sword undraggable.
+   */
+  private renderedInventoryItems: ({ itemId: string; usable: boolean } | null)[] = [];
   private readonly onUseItem: (itemId: string) => void;
   private readonly onCommand: (id: string) => void;
+  private readonly onGiveGold: (toId: number, amount: number) => void;
+  private readonly onGiveItem: (toId: number, itemId: string) => void;
+  private readonly alliesEl: HTMLElement;
+  private allyCards: {
+    root: HTMLElement;
+    /** Mutated per frame: the card is reused, the hero in it may not be. */
+    id: EntityId;
+    /** The name in plain text, for the gift dialog's heading. */
+    label: string;
+    name: TextCell;
+    art: HTMLImageElement;
+    artFor: string;
+    bar: BarCell;
+  }[] = [];
+  /** When the last drag finished, so the click it produces can be ignored. */
+  private dragEndedAt = 0;
+  private readonly goldDialog: HTMLElement;
+  private readonly goldInput: HTMLInputElement;
+  private goldTarget: EntityId = -1;
+  /** The player's own gold, so the gift dialog can cap what it offers. */
+  private playerGold = 0;
   private commandCells: {
     root: HTMLElement;
     cd: HTMLElement;
@@ -426,21 +512,42 @@ export class Hud {
 
   constructor(
     showStats: boolean,
-    callbacks: { useItem: (itemId: string) => void; command: (id: string) => void } = {
+    callbacks: {
+      useItem: (itemId: string) => void;
+      command: (id: string) => void;
+      giveGold?: (toId: number, amount: number) => void;
+      giveItem?: (toId: number, itemId: string) => void;
+    } = {
       useItem: () => {},
       command: () => {},
     },
   ) {
     this.onUseItem = callbacks.useItem;
     this.onCommand = callbacks.command;
+    this.onGiveGold = callbacks.giveGold ?? (() => {});
+    this.onGiveItem = callbacks.giveItem ?? (() => {});
     this.root = el('div', 'hud');
 
-    // ── Core integrity (top left)
+    // ── Top left: the Core, and under it the team-mates.
+    //
+    // A column rather than two panels each pinned to the corner. The Core box
+    // changes height with the root font size, so anything placed below it by a
+    // fixed offset either overlaps it or floats away from it at some window
+    // size; stacked, they cannot.
+    const leftColumn = el('div', 'hud-left');
     const core = el('div', 'hud-core ui-panel ui-gilt');
     core.appendChild(el('div', 'label', 'Integridad del Núcleo'));
     this.corePips = el('div', 'pips');
     core.appendChild(this.corePips);
-    this.root.appendChild(core);
+    leftColumn.appendChild(core);
+
+    // Built empty: most matches are one player and the panel then takes no
+    // room at all. `refresh` creates one card per ally the first time the
+    // roster has a size, which is also how it copes with a 3v3 without the
+    // HUD knowing what the team sizes are.
+    this.alliesEl = el('div', 'hud-allies is-hidden');
+    leftColumn.appendChild(this.alliesEl);
+    this.root.appendChild(leftColumn);
 
     // ── Wave banner (top centre)
     const wave = el('div', 'hud-wave ui-panel ui-gilt');
@@ -468,10 +575,19 @@ export class Hud {
     goldBox.appendChild(el('span', 'dot'));
     const goldEl = el('span', undefined, '0');
     goldBox.appendChild(goldEl);
-    const infBox = el('div', 'res influence ui-panel');
+    // Influence is what sabotage is bought with, so the counter is also the
+    // door to it: the shop can be used from anywhere on the field, and a
+    // player who has to walk home to press a button cannot use that.
+    const infBox = el('button', 'res influence ui-panel is-shop');
+    infBox.type = 'button';
     infBox.appendChild(el('span', 'dot'));
     const infEl = el('span', undefined, '0');
     infBox.appendChild(infEl);
+    setTip(infBox, {
+      head: 'Influencia',
+      body: 'Clic para abrir la tienda de sabotaje, estés donde estés · S',
+    });
+    infBox.addEventListener('click', () => callbacks.command('shop.sabotage'));
     res.append(goldBox, infBox);
     this.root.appendChild(res);
     this.goldValue = new TextCell(goldEl);
@@ -481,6 +597,43 @@ export class Hud {
     // to cover the killing blow's damage number.
     this.goldGain = el('div', 'gold-gain');
     goldBox.appendChild(this.goldGain);
+
+    // ── How much gold to hand over.
+    //
+    // A dialog rather than a drag like the items use: a quantity has no
+    // gesture, and the player asked for a figure typed in with an accept and a
+    // cancel. Enter accepts and Escape cancels, because a box with a text
+    // field in it that ignores the keyboard reads as broken.
+    this.goldDialog = el('div', 'hud-gift is-hidden');
+    this.goldDialog.innerHTML =
+      '<div class="hud-gift-plate ui-panel ui-gilt">' +
+      '<b class="hud-gift-title">Entregar oro</b>' +
+      '<i class="hud-gift-to"></i>' +
+      '<input class="hud-gift-amount" type="number" min="1" step="1" value="100">' +
+      '<span class="hud-gift-purse"></span>' +
+      '<div class="hud-gift-row">' +
+      '<button class="menu-btn is-compact hud-gift-ok" type="button">Aceptar</button>' +
+      '<button class="menu-btn is-compact hud-gift-cancel" type="button">Cancelar</button>' +
+      '</div></div>';
+    this.goldInput = this.goldDialog.querySelector('.hud-gift-amount') as HTMLInputElement;
+    this.goldDialog
+      .querySelector('.hud-gift-ok')!
+      .addEventListener('click', () => this.confirmGift());
+    this.goldDialog
+      .querySelector('.hud-gift-cancel')!
+      .addEventListener('click', () => this.closeGift());
+    this.goldInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') this.confirmGift();
+      else if (ev.key === 'Escape') this.closeGift();
+      // The match listens for Q/W/E/R and Space on the window. Typing 100 into
+      // a box should not also cast and pause the game.
+      ev.stopPropagation();
+    });
+    // Clicking the backdrop dismisses it, the same as cancel.
+    this.goldDialog.addEventListener('click', (ev) => {
+      if (ev.target === this.goldDialog) this.closeGift();
+    });
+    this.root.appendChild(this.goldDialog);
 
     // ── Defeat screen. Covers everything and takes pointer events, so the
     //    match is genuinely over rather than merely announced.
@@ -528,6 +681,12 @@ export class Hud {
     const crest = el('canvas');
     drawCrest(crest, 0x2a3550, 0xc8a253, 7);
     portrait.appendChild(crest);
+    this.portraitArt = document.createElement('img');
+    this.portraitArt.className = 'portrait-art';
+    this.portraitArt.alt = '';
+    this.portraitArt.draggable = false;
+    this.portraitArt.hidden = true;
+    portrait.appendChild(this.portraitArt);
     const levelEl = el('div', 'level', '1');
     portrait.appendChild(levelEl);
     heroBox.appendChild(portrait);
@@ -604,8 +763,19 @@ export class Hud {
       slot.appendChild(el('span', 'inv-glyph'));
       slot.appendChild(el('span', 'inv-count'));
       slot.addEventListener('click', () => {
+        // A drag that ended back on its own slot still fires a click. Without
+        // this, handing a potion over and changing your mind would drink it.
+        if (performance.now() - this.dragEndedAt < 250) return;
         const entry = this.renderedInventoryItems[i];
-        if (entry) this.onUseItem(entry.itemId);
+        if (entry?.usable) this.onUseItem(entry.itemId);
+      });
+      // Handing an item over is a drag onto the team-mate's portrait, which is
+      // what the player asked for and also the only gesture that cannot be
+      // confused with drinking the potion in the same slot.
+      slot.addEventListener('pointerdown', (ev) => {
+        const entry = this.renderedInventoryItems[i];
+        if (!entry || ev.button !== 0) return;
+        this.beginDrag(slot, ev, entry.itemId);
       });
       this.inventoryEl.appendChild(slot);
     }
@@ -656,6 +826,169 @@ export class Hud {
     // also wants to be called "stats" but is part of the game, not the harness.
     this.statsBox = showStats ? el('div', 'hud-perf ui-panel') : null;
     if (this.statsBox) this.root.appendChild(this.statsBox);
+  }
+
+  /**
+   * One card per team-mate.
+   *
+   * Rebuilt rather than reconciled: the roster changes at most once a match,
+   * when the second player's hero spawns, so the cheap thing to optimise here
+   * is the per-frame path, and that one only writes values that changed.
+   */
+  private buildAllyCards(count: number): void {
+    this.allyCards = [];
+    this.alliesEl.textContent = '';
+    for (let i = 0; i < count; i++) {
+      const root = el('div', 'ally ui-panel ui-gilt');
+
+      const portrait = el('div', 'ally-portrait');
+      const crest = el('canvas');
+      drawCrest(crest, 0x2a3550, 0xc8a253, 5);
+      portrait.appendChild(crest);
+      const art = document.createElement('img');
+      art.className = 'ally-art';
+      art.alt = '';
+      // Without this the browser's own image drag starts instead of the
+      // slot's, and the drop never arrives.
+      art.draggable = false;
+      art.hidden = true;
+      portrait.appendChild(art);
+      // Only visible while an item is in flight: a permanent "drop here" label
+      // on a portrait would be noise for the whole match. Three letters,
+      // because the portrait is 46 px and "Entregar" rendered as "ENTREG".
+      portrait.appendChild(el('span', 'ally-drop', 'Dar'));
+      root.appendChild(portrait);
+
+      const info = el('div', 'ally-info');
+      const nameEl = el('div', 'ally-name', '—');
+      const barEl = el('div', 'bar health');
+      const fill = el('i');
+      const hpText = el('span');
+      barEl.append(fill, hpText);
+      info.append(nameEl, barEl);
+      root.appendChild(info);
+
+      const coin = el('button', 'ally-gold', COIN_GLYPH);
+      coin.type = 'button';
+      coin.setAttribute('aria-label', 'Entregar oro');
+      root.appendChild(coin);
+
+      const card = {
+        root,
+        id: -1 as EntityId,
+        label: '',
+        name: new TextCell(nameEl),
+        art,
+        artFor: '',
+        bar: new BarCell(fill, new TextCell(hpText)),
+      };
+
+      setTip(coin, { head: 'Entregar oro', body: 'Elige cuánto le pasas' });
+      coin.addEventListener('click', () => this.openGift(card.id, card.label));
+
+      // The drop target is the whole card, not just the portrait: the player
+      // described dragging onto the portrait, and a 48 px square is a mean
+      // target for a gesture whose failure silently does nothing. `beginDrag`
+      // finds it by hit-testing for `.ally`, so nothing is bound here.
+      this.allyCards.push(card);
+      this.alliesEl.appendChild(root);
+    }
+  }
+
+  /**
+   * Carries one item from a slot to a team-mate's portrait.
+   *
+   * Pointer events rather than the HTML5 drag API, which does not exist on
+   * touch at all — and this game ships a phone layout. One implementation
+   * serves the mouse and the finger, and it is the same code path in both,
+   * so a bug here cannot hide on one of them.
+   */
+  private beginDrag(slot: HTMLElement, down: PointerEvent, itemId: string): void {
+    const startX = down.clientX;
+    const startY = down.clientY;
+    let armed = false;
+    let hot: HTMLElement | null = null;
+
+    const ghost = el('div', 'drag-ghost');
+    ghost.innerHTML = slot.querySelector('.inv-glyph')?.innerHTML ?? '';
+
+    /** The card under the pointer, if it can take the item. */
+    const cardAt = (x: number, y: number): HTMLElement | null => {
+      // The ghost is `pointer-events: none`, or every sample would hit it.
+      const card = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('.ally');
+      return card instanceof HTMLElement && !card.classList.contains('is-dead') ? card : null;
+    };
+
+    const onMove = (ev: PointerEvent): void => {
+      if (ev.pointerId !== down.pointerId) return;
+      if (!armed) {
+        // A few pixels of slop, so a click on a potion stays a click.
+        if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 6) return;
+        armed = true;
+        this.alliesEl.classList.add('is-dropping');
+        slot.classList.add('is-dragging');
+        document.body.appendChild(ghost);
+      }
+      ghost.style.transform = `translate(${ev.clientX}px, ${ev.clientY}px)`;
+      const card = cardAt(ev.clientX, ev.clientY);
+      if (card !== hot) {
+        hot?.classList.remove('is-over');
+        card?.classList.add('is-over');
+        hot = card;
+      }
+    };
+
+    const end = (ev: PointerEvent, drop: boolean): void => {
+      if (ev.pointerId !== down.pointerId) return;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      if (!armed) return;
+      hot?.classList.remove('is-over');
+      slot.classList.remove('is-dragging');
+      this.alliesEl.classList.remove('is-dropping');
+      ghost.remove();
+      this.dragEndedAt = performance.now();
+      const card = drop ? cardAt(ev.clientX, ev.clientY) : null;
+      const to = card ? this.allyCards.find((c) => c.root === card) : undefined;
+      if (to && to.id >= 0) this.onGiveItem(to.id, itemId);
+    };
+
+    const onUp = (ev: PointerEvent): void => end(ev, true);
+    const onCancel = (ev: PointerEvent): void => end(ev, false);
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  }
+
+  /** Opens the amount dialog for one team-mate. */
+  private openGift(id: EntityId, label: string): void {
+    if (id < 0) return;
+    this.goldTarget = id;
+    const purse = Math.max(0, Math.floor(this.playerGold));
+    this.goldDialog.querySelector('.hud-gift-to')!.textContent = `para ${label}`;
+    this.goldDialog.querySelector('.hud-gift-purse')!.textContent = `Llevas ${purse} de oro`;
+    this.goldInput.max = String(Math.max(1, purse));
+    this.goldInput.value = String(Math.max(1, Math.min(100, purse)));
+    this.goldDialog.classList.remove('is-hidden');
+    this.goldInput.focus();
+    this.goldInput.select();
+  }
+
+  private closeGift(): void {
+    this.goldDialog.classList.add('is-hidden');
+    this.goldTarget = -1;
+  }
+
+  /** Sends the gift, if the figure in the box is one. */
+  private confirmGift(): void {
+    const amount = Math.floor(Number(this.goldInput.value));
+    const to = this.goldTarget;
+    // Closed first: the economy may refuse this, and its toast should land on
+    // the HUD rather than behind a dialog the player has to dismiss.
+    this.closeGift();
+    if (to >= 0 && Number.isFinite(amount) && amount > 0) this.onGiveGold(to, amount);
   }
 
   /** Where `HudModule` mounts the minimap canvas. */
@@ -738,7 +1071,7 @@ export class Hud {
       // which is how the R key and the yellow cross ended up outside the box.
       const node = el('button', `command cmd-${slot.kind}`);
       if (slot.hotkey) node.appendChild(el('div', 'key', slot.hotkey));
-      node.appendChild(el('div', 'glyph', icon(slot.icon, 28)));
+      node.appendChild(el('div', 'glyph', glyphFor(slot.art, slot.icon, 28)));
       if (slot.cost !== undefined) {
         node.appendChild(el('div', `cost ${slot.currency ?? 'gold'}`, String(slot.cost)));
       } else if (slot.manaCost) {
@@ -776,6 +1109,14 @@ export class Hud {
     this.goldValue.set(String(Math.floor(model.gold)));
     this.influenceValue.set(String(Math.floor(model.influence)));
 
+    // Only touch the src when the hero changes: assigning the same URL every
+    // frame makes the browser re-decode it.
+    const art = heroPortrait(model.heroArt) ?? '';
+    if (art !== this.portraitArtFor) {
+      this.portraitArtFor = art;
+      if (art) this.portraitArt.src = art;
+      this.portraitArt.hidden = !art;
+    }
     this.heroName.set(model.heroName);
     this.levelValue.set(String(model.level));
     this.healthBar.set(model.health, model.maxHealth);
@@ -932,8 +1273,40 @@ export class Hud {
     this.downed.classList.toggle('is-hidden', !downed);
     if (downed) this.downedCount.set(String(Math.ceil(model.reviveCountdown)));
 
+    // Team-mates. The panel hides itself when there is nobody to give
+    // anything to, which is every single-player match.
+    this.playerGold = model.gold;
+    if (model.allies.length !== this.allyCards.length) this.buildAllyCards(model.allies.length);
+    this.alliesEl.classList.toggle('is-hidden', model.allies.length === 0);
+    for (let i = 0; i < this.allyCards.length; i++) {
+      const ally = model.allies[i]!;
+      const card = this.allyCards[i]!;
+      card.id = ally.id;
+      card.label = ally.name;
+      card.name.set(ally.name);
+      const allyArt = heroPortrait(ally.art) ?? '';
+      if (allyArt !== card.artFor) {
+        card.artFor = allyArt;
+        if (allyArt) card.art.src = allyArt;
+        card.art.hidden = !allyArt;
+      }
+      card.bar.set(Math.max(0, ally.health), ally.maxHealth);
+      card.root.classList.toggle('is-dead', !ally.alive);
+    }
+    // A dialog left open over a hero who has died or disconnected would send
+    // gold nowhere, so it closes itself.
+    if (
+      this.goldTarget >= 0 &&
+      !model.allies.some((a) => a.id === this.goldTarget && a.alive)
+    ) {
+      this.closeGift();
+    }
+
     // Inventory. Rebuilt only when the contents change, not per frame.
-    const invSignature = model.inventory.map((i) => `${i.itemId}x${i.count}`).join('|');
+    // The ally count is part of the signature because the tooltip changes when
+    // there is somebody to hand things to.
+    const invSignature =
+      `${model.allies.length}:` + model.inventory.map((i) => `${i.itemId}x${i.count}`).join('|');
     if (invSignature !== this.renderedInventory) {
       this.renderedInventory = invSignature;
       this.renderedInventoryItems = [];
@@ -948,19 +1321,21 @@ export class Hud {
         // looks pressable but does nothing is worse than one that does not.
         const usable = entry !== undefined && entry.count > 0 && entry.itemId.startsWith('potion.');
         slot.classList.toggle('is-usable', usable);
+        const handover = model.allies.length > 0 ? ' · Arrastra al aliado para dárselo' : '';
         setTip(
           slot,
           entry
             ? {
                 head: entry.name,
                 meta: entry.count > 1 ? `Llevas ${entry.count}` : undefined,
-                body: usable ? 'Clic para usar' : 'Equipado — efecto permanente',
+                body: (usable ? 'Clic para usar' : 'Equipado — efecto permanente') + handover,
               }
             : null,
         );
-        glyph.innerHTML = entry ? icon(entry.icon, 26) : '';
+        glyph.innerHTML = entry ? glyphFor(entry.itemId, entry.icon, 26) : '';
         count.textContent = entry && entry.count > 1 ? String(entry.count) : '';
-        this.renderedInventoryItems.push(usable ? { itemId: entry.itemId } : null);
+        slot.classList.toggle('is-draggable', entry !== undefined);
+        this.renderedInventoryItems.push(entry ? { itemId: entry.itemId, usable } : null);
       }
     }
 
@@ -982,6 +1357,10 @@ export interface HudOptions {
   minimap: MinimapCallbacks;
   /** Id of the hero the local player controls, for bar and mana highlighting. */
   playerHeroId: () => EntityId | null;
+  /** Hands gold to a team-mate. */
+  giveGold: (toId: EntityId, amount: number) => void;
+  /** Hands one item to a team-mate; it lands at their feet if they are full. */
+  giveItem: (toId: EntityId, itemId: string) => void;
   /** The local player's team; messages addressed to the other team are hidden. */
   localTeam: () => TeamId;
   /** Unit the player has clicked, drawn with a target reticle. */
@@ -1024,6 +1403,11 @@ export class HudModule implements GameModule {
     minimap: true,
     damageNumbers: true,
   };
+
+  /** The dropped item under a screen point, for the click that picks it up. */
+  dropAt(x: number, y: number): number | null {
+    return this.world?.dropAt(x, y) ?? null;
+  }
 
   /** Drops the move-order cross on the ground. Ignored before the world exists. */
   markMoveOrder(pos: { x: number; z: number }): void {
@@ -1070,6 +1454,8 @@ export class HudModule implements GameModule {
     this.hud = new Hud(this.opts.showStats, {
       useItem: (itemId) => this.opts.useItem(itemId),
       command: (id) => this.opts.command(id),
+      giveGold: (toId, amount) => this.opts.giveGold(toId, amount),
+      giveItem: (toId, itemId) => this.opts.giveItem(toId, itemId),
     });
     this.opts.mount.appendChild(this.hud.root);
 
@@ -1093,6 +1479,7 @@ export class HudModule implements GameModule {
     this.hint.className = 'hud-hint ui-panel';
     this.hint.innerHTML =
       '<b>Clic derecho</b> mover o atacar · <b>Q W E R</b> habilidades · ' +
+      '<b>S</b> tienda de sabotaje · ' +
       '<b>Flechas</b> / bordes desplazar · <b>Rueda</b> zoom · ' +
       '<b>Espacio</b> pausa · <b>A</b> atacar en movimiento · <b>F</b> centrar en héroe';
     this.hud.root.appendChild(this.hint);
@@ -1167,6 +1554,7 @@ export class HudModule implements GameModule {
     // After the HUD, so a tip that is open over a button reflects the values
     // that button was just repainted with.
     this.tooltip.refresh();
+    this.world.setDrops(this.opts.model.drops);
     this.world.update(
       dt,
       this.match,

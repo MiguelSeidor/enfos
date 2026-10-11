@@ -273,6 +273,16 @@ export interface Landmark {
   radius: number;
   /** Terrace level the pad is forced to. */
   level: number;
+  /**
+   * Radius a unit cannot walk into, if any.
+   *
+   * Separate from `radius`, which is the PAD -- the flattened, prop-cleared
+   * ground a structure stands on, and which a player has to be able to walk
+   * across to reach the thing standing there. What is solid is the building
+   * itself, a good deal smaller: the Core's pad is 9 m and its crystal is
+   * about 5.
+   */
+  solid?: number;
 }
 
 /**
@@ -294,10 +304,10 @@ export const LANDMARKS: readonly Landmark[] = [
   // pad has to clear the lane by half-width + feather + its own radius (~22 m)
   // or the lane carve drags it down to the lane's terrace — which is exactly
   // what the validator caught when the shops sat at u=30/66.
-  { kind: 'core', u: 48, v: 44, radius: 9, level: BASE_LEVEL },
-  { kind: 'shopProgression', u: 36, v: 30, radius: 6, level: BASE_LEVEL },
-  { kind: 'shopSabotage', u: 60, v: 30, radius: 6, level: BASE_LEVEL },
-  { kind: 'fountain', u: 48, v: 26, radius: 5.5, level: BASE_LEVEL },
+  { kind: 'core', u: 48, v: 44, radius: 9, level: BASE_LEVEL , solid: 5 },
+  { kind: 'shopProgression', u: 36, v: 30, radius: 6, level: BASE_LEVEL , solid: 3.6 },
+  { kind: 'shopSabotage', u: 60, v: 30, radius: 6, level: BASE_LEVEL , solid: 3.6 },
+  { kind: 'fountain', u: 48, v: 26, radius: 5.5, level: BASE_LEVEL , solid: 3.6 },
   { kind: 'combatZone', u: 48, v: 66, radius: 10, level: 1 },
 ];
 

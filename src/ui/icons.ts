@@ -101,6 +101,113 @@ export function icon(id: IconId, size = 24): string {
 }
 
 /**
+ * Painted art, drawn per ability and per item.
+ *
+ * The SVG set above is keyed by `IconId`, and several things share one: a
+ * single glyph served four abilities and five shop items, so `IconId` cannot
+ * address art that exists once per thing. The painted files are named after the
+ * thing itself, so the thing's own id is the key -- `bulwark.q` becomes
+ * `icon_bulwark_q`, `item.hunterGloves` becomes `icon_item_hunter_gloves`.
+ *
+ * `PAINTED = false` puts every one of them back to the SVG in a single step.
+ * Nothing above is deleted, and the stat glyphs and the order buttons keep
+ * using it regardless, because no art was drawn for those.
+ */
+export const PAINTED = true;
+
+/** Read off `public/icons` when this was wired, so the two cannot drift. */
+const PAINTED_ART: ReadonlySet<string> = new Set([
+  'icon_book_experience',
+  'icon_book_focus',
+  'icon_book_power',
+  'icon_book_vitality',
+  'icon_bulwark_e',
+  'icon_bulwark_q',
+  'icon_bulwark_r',
+  'icon_bulwark_w',
+  'icon_invoke_stop_time',
+  'icon_invoke_true_sight',
+  'icon_item_crown_of_hours',
+  'icon_item_duelist_edge',
+  'icon_item_hunter_gloves',
+  'icon_item_iron_plate',
+  'icon_item_lifedrinker',
+  'icon_item_rune_focus',
+  'icon_item_swift_boots',
+  'icon_item_titans_heart',
+  'icon_item_warding_sigil',
+  'icon_item_whetstone',
+  'icon_oracle_e',
+  'icon_oracle_q',
+  'icon_oracle_r',
+  'icon_oracle_w',
+  'icon_potion_health_greater',
+  'icon_potion_health_minor',
+  'icon_potion_health_supreme',
+  'icon_potion_mana_greater',
+  'icon_potion_mana_minor',
+  'icon_potion_mana_superior',
+  'icon_sab_elite',
+  'icon_sab_frenzy',
+  'icon_sab_hex',
+  'icon_sab_reinforcements',
+  'icon_talon_e',
+  'icon_talon_q',
+  'icon_talon_r',
+  'icon_talon_w',
+  'icon_vesper_e',
+  'icon_vesper_q',
+  'icon_vesper_r',
+  'icon_vesper_w',
+]);
+
+/** `item.hunterGloves` -> `icon_item_hunter_gloves`. */
+export function artFile(id: string): string {
+  return (
+    'icon_' +
+    id.replace(/\./g, '_').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+  );
+}
+
+/**
+ * Painted art for `id` if there is any, and the SVG otherwise.
+ *
+ * The fallback is not defensive clutter: an ability or item added later has no
+ * plate until someone draws one, and a missing file would otherwise render as a
+ * broken image in the ability bar.
+ */
+export function glyph(id: string | undefined, fallback: IconId, size = 24): string {
+  if (!PAINTED || !id) return icon(fallback, size);
+  const file = artFile(id);
+  if (!PAINTED_ART.has(file)) return icon(fallback, size);
+  return (
+    `<img class="art" src="/icons/${file}.png" width="${size}" height="${size}" ` +
+    `alt="" draggable="false">`
+  );
+}
+
+/** Painted hero and boss portraits, by hero id. Read off `public/portraits`. */
+const PORTRAIT_ART: ReadonlySet<string> = new Set([
+  'bulwark',
+  'marrow_titan',
+  'oracle',
+  'talon',
+  'vesper',
+]);
+
+/**
+ * A painted portrait for `heroId`, or null when there is none.
+ *
+ * Null rather than a placeholder on purpose: the caller already draws
+ * `drawCrest` into that slot, and a crest is a better empty state than a broken
+ * image or a grey box.
+ */
+export function heroPortrait(heroId: string | undefined): string | null {
+  if (!PAINTED || !heroId || !PORTRAIT_ART.has(heroId)) return null;
+  return `/portraits/portrait_${heroId}.png`;
+}
+
+/**
  * Procedural hero crest for the portrait slot.
  *
  * A real portrait wants an off-screen render of the hero's head, which needs a

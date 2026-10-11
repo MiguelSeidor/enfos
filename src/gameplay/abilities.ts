@@ -39,8 +39,53 @@ import { hasLineOfSight } from './sight';
 import { runtimeOf } from './units';
 import { cos, hypot, sin } from '@/core/detmath';
 
+/**
+ * How one number on an ability grows with the hero's level.
+ *
+ * Abilities had no level scaling at all: damage rose only because it reads the
+ * caster's attack power, while range, radius and duration were constants. That
+ * made a short utility like the dash strictly worse every level -- the map does
+ * not shrink -- and an ultimate that stayed the same size while everything
+ * around it grew.
+ *
+ * `max` is not optional and the cap is the point. Levels are unbounded by
+ * design (GDD 9), so anything that grows per level without a ceiling eventually
+ * covers the map.
+ */
+export interface Growth {
+  /** Added per level above 1. */
+  per: number;
+  /** The most the growth may ever add, on top of the base. */
+  max: number;
+}
+
+export interface AbilityGrowth {
+  range?: Growth;
+  radius?: Growth;
+  /** Seconds of effect; what that means is up to the ability. */
+  duration?: Growth;
+}
+
+/** `base` grown for a hero at `level`, never past the cap. */
+export function grown(base: number, g: Growth | undefined, level: number): number {
+  if (!g) return base;
+  return base + Math.min(g.max, g.per * Math.max(0, level - 1));
+}
+
+/** The reach an ability actually has for this hero. Used for aiming too. */
+export function abilityRange(def: AbilityDef, level: number): number {
+  return grown(def.range, def.growth?.range, level);
+}
+
+/** The area it actually covers. */
+export function abilityRadius(def: AbilityDef, level: number): number {
+  return grown(def.radius, def.growth?.radius, level);
+}
+
 export interface AbilityContext {
   caster: UnitState;
+  /** The caster's hero level, or 1 for anything that is not a hero. */
+  level: number;
   combat: CombatService;
   units: UnitService;
   ctx: GameContext;
@@ -109,6 +154,12 @@ export interface AbilityDef {
   range: number;
   /** Area of effect, shown on the ground while aiming a `point` ability. */
   radius: number;
+  /**
+   * What grows with the hero's level. Absent means the ability is the same at
+   * level 40 as at level 1, which is right for some and wrong for anything the
+   * player is meant to keep using.
+   */
+  growth?: AbilityGrowth;
   cast(c: AbilityContext): boolean;
   /** Runs a delayed step booked with `c.after` / `c.repeat`. */
   onTimer?(c: AbilityContext, key: string, data: TimerData): void;
@@ -212,9 +263,12 @@ const BULWARK: AbilityDef[] = [
     targeting: 'self',
     range: 0,
     radius: 13,
+    // The circle, and only the circle: it is cast on itself, so there is no
+    // range to grow, and the blast is instantaneous.
+    growth: { radius: { per: 0.25, max: 4 } },
     cast(c) {
-      c.fx('impact.nova', c.caster.pos, this.radius);
-      const targets = hostilesIn(c, c.caster.pos, this.radius);
+      c.fx('impact.nova', c.caster.pos, abilityRadius(this, c.level));
+      const targets = hostilesIn(c, c.caster.pos, abilityRadius(this, c.level));
       for (const t of targets) {
         c.combat.applyDamage({
           targetId: t.id,
@@ -397,7 +451,7 @@ const ORACLE: AbilityDef[] = [
     id: 'oracle.r',
     name: 'Meteoro del umbral',
     description:
-      'Invoca un meteoro que cae sobre la zona elegida tras 1,2 s: daño enorme y aturdimiento breve. El suelo arde 4 s después del impacto.',
+      'Invoca un meteoro que cae sobre la zona elegida tras 1,2 s: daño enorme y aturdimiento breve. El suelo arde tras el impacto. Con cada nivel gana alcance, área y duración.',
     icon: 'flame',
     key: 'R',
     cooldown: 70,
@@ -405,11 +459,16 @@ const ORACLE: AbilityDef[] = [
     targeting: 'point',
     range: 18,
     radius: 6.5,
+    growth: {
+      range: { per: 0.5, max: 7 },
+      radius: { per: 0.2, max: 3 },
+      duration: { per: 0.2, max: 3 },
+    },
     cast(c) {
       if (c.target.kind !== 'point') return false;
       const center = { x: c.target.pos.x, z: c.target.pos.z };
-      c.vfx?.telegraph('circle', center, this.radius, 1.2, 0xff5a3c);
-      c.vfx?.telegraph('ring', center, this.radius, 1.2, 0xffa050);
+      c.vfx?.telegraph('circle', center, abilityRadius(this, c.level), 1.2, 0xff5a3c);
+      c.vfx?.telegraph('ring', center, abilityRadius(this, c.level), 1.2, 0xffa050);
       // The rock itself, falling. It starts 48 m up and slightly behind the
       // camera's shoulder, and its speed is solved so that it lands on the
       // same tick the impact resolves — a meteor that arrives late reads as a
@@ -428,13 +487,13 @@ const ORACLE: AbilityDef[] = [
     },
     onTimer(c, key, data) {
       const center = { x: data.x as number, z: data.z as number };
-      const burn = this.radius * 0.75;
+      const burn = abilityRadius(this, c.level) * 0.75;
       if (key === 'impact') {
-        c.fx('impact.meteor', center, this.radius);
-        c.vfx?.decal('scorch', center, this.radius * 0.85, 12);
+        c.fx('impact.meteor', center, abilityRadius(this, c.level));
+        c.vfx?.decal('scorch', center, abilityRadius(this, c.level) * 0.85, 12);
         c.sound('ability.oracle.r.impact', center);
         c.ctx.bus.emit('camera:shake', { intensity: 1, duration: 0.6, team: c.caster.team as TeamId });
-        for (const t of hostilesIn(c, center, this.radius)) {
+        for (const t of hostilesIn(c, center, abilityRadius(this, c.level))) {
           c.combat.applyDamage({
             targetId: t.id,
             sourceId: c.caster.id,
@@ -444,7 +503,9 @@ const ORACLE: AbilityDef[] = [
           });
           c.stun(t, 0.8);
         }
-        c.repeat(0.5, 8, 'burn', { x: center.x, z: center.z });
+        // Four seconds of burning ground at base, in half-second ticks.
+        const seconds = grown(4, this.growth?.duration, c.level);
+        c.repeat(0.5, Math.round(seconds / 0.5), 'burn', { x: center.x, z: center.z });
         return;
       }
       if (key !== 'burn' || data.i === 0) return; // the impact itself was pulse 0
@@ -585,7 +646,7 @@ const TALON: AbilityDef[] = [
     id: 'talon.e',
     name: 'Paso del viento',
     description:
-      'Se desplaza al punto elegido (hasta 8 m) y dispara un 45 % más rápido durante 4 s. No atraviesa terreno intransitable.',
+      'Se desplaza al punto elegido (8 m, y más con cada nivel hasta 16) y dispara un 45 % más rápido durante 4 s. No atraviesa terreno intransitable.',
     icon: 'wind-step',
     key: 'E',
     cooldown: 13,
@@ -593,14 +654,20 @@ const TALON: AbilityDef[] = [
     targeting: 'point',
     range: 8,
     radius: 0,
+    // Eight metres is barely two seconds of walking, so at level 1 this is an
+    // escape and nothing more -- which is right -- but the map does not shrink
+    // and by level 20 it had become a worse way to move than moving. Half a
+    // metre a level doubles it across a long match and stops there.
+    growth: { range: { per: 0.5, max: 8 } },
     cast(c) {
       if (c.target.kind !== 'point') return false;
+      const reach = grown(this.range, this.growth?.range, c.level);
       const from = { x: c.caster.pos.x, z: c.caster.pos.z };
       const dx = c.target.pos.x - from.x;
       const dz = c.target.pos.z - from.z;
       const len = hypot(dx, dz);
       if (len < 0.4) return false;
-      const capped = Math.min(len, this.range);
+      const capped = Math.min(len, reach);
       // Walks the line back from the aimed point until it finds ground she may
       // stand on, so a step aimed into a cliff lands at its foot instead of
       // failing outright — and never puts her somewhere she could not walk to.
@@ -632,7 +699,7 @@ const TALON: AbilityDef[] = [
     id: 'talon.r',
     name: 'Lluvia de flechas',
     description:
-      'Cubre la zona elegida de flechas durante 4 s: daña cada medio segundo, ralentiza un 30 % y deja sin armadura a quien siga dentro.',
+      'Cubre la zona elegida de flechas: daña cada medio segundo, ralentiza un 30 % y deja sin armadura a quien siga dentro. Con cada nivel gana alcance, área y duración.',
     icon: 'arrow-rain',
     key: 'R',
     cooldown: 75,
@@ -640,24 +707,35 @@ const TALON: AbilityDef[] = [
     targeting: 'point',
     range: 18,
     radius: 7.5,
+    // All three, because an ultimate that keeps its size while the waves grow
+    // stops being an ultimate. Duration is in seconds here and turned into
+    // half-second volleys below.
+    growth: {
+      range: { per: 0.6, max: 9 },
+      radius: { per: 0.22, max: 3.5 },
+      duration: { per: 0.2, max: 3 },
+    },
     cast(c) {
       if (c.target.kind !== 'point') return false;
       const center = { x: c.target.pos.x, z: c.target.pos.z };
-      c.vfx?.telegraph('ring', center, this.radius, 0.6, 0xc9b06a);
+      c.vfx?.telegraph('ring', center, abilityRadius(this, c.level), 0.6, 0xc9b06a);
       c.sound('ability.talon.r', center);
       c.after(0.6, 'volley', { x: center.x, z: center.z });
       return true;
     },
     onTimer(c, key, data) {
       const center = { x: data.x as number, z: data.z as number };
+      const radius = abilityRadius(this, c.level);
       if (key === 'volley') {
-        c.vfx?.decal('scorch', center, this.radius * 0.9, 6);
+        c.vfx?.decal('scorch', center, radius * 0.9, 6);
         c.ctx.bus.emit('camera:shake', { intensity: 0.5, duration: 0.3, team: c.caster.team as TeamId });
-        c.repeat(0.5, 8, 'rain', { x: center.x, z: center.z });
+        // Four seconds at base, half a second apart, and longer with level.
+        const seconds = grown(4, this.growth?.duration, c.level);
+        c.repeat(0.5, Math.round(seconds / 0.5), 'rain', { x: center.x, z: center.z });
         return;
       }
       if (key !== 'rain') return;
-      for (const t of hostilesIn(c, center, this.radius)) {
+      for (const t of hostilesIn(c, center, radius)) {
         c.combat.applyDamage({
           targetId: t.id,
           sourceId: c.caster.id,
@@ -671,7 +749,7 @@ const TALON: AbilityDef[] = [
       const rng = c.ctx.rng;
       for (let k = 0; k < 3; k++) {
         const a = rng.range(0, Math.PI * 2);
-        const r = Math.sqrt(rng.range(0, 1)) * this.radius * 0.95;
+        const r = Math.sqrt(rng.range(0, 1)) * radius * 0.95;
         c.fx('hit.pierce', { x: center.x + cos(a) * r, z: center.z + sin(a) * r }, 1.2);
       }
       if ((data.i as number) > 0) c.sound('ability.talon.r.tick', center);
@@ -830,16 +908,17 @@ const VESPER: AbilityDef[] = [
     targeting: 'self',
     range: 0,
     radius: 13,
+    growth: { radius: { per: 0.25, max: 4 } },
     cast(c) {
-      c.fx('impact.nova', c.caster.pos, this.radius);
-      c.vfx?.decal('sigil', c.caster.pos, this.radius * 0.8, 8);
+      c.fx('impact.nova', c.caster.pos, abilityRadius(this, c.level));
+      c.vfx?.decal('sigil', c.caster.pos, abilityRadius(this, c.level) * 0.8, 8);
       c.sound('ability.vesper.r', c.caster.pos);
       c.ctx.bus.emit('camera:shake', { intensity: 0.7, duration: 0.4, team: c.caster.team as TeamId });
-      for (const ally of alliesIn(c, c.caster.pos, this.radius)) {
+      for (const ally of alliesIn(c, c.caster.pos, abilityRadius(this, c.level))) {
         c.combat.applyHeal(ally.id, c.caster.id, c.caster.stats.spellPower * 2.4 + ally.stats.maxHealth * 0.22);
         c.fx('hit.holy', ally.pos, 1.3);
       }
-      for (const foe of hostilesIn(c, c.caster.pos, this.radius)) {
+      for (const foe of hostilesIn(c, c.caster.pos, abilityRadius(this, c.level))) {
         c.combat.applyDamage({
           targetId: foe.id,
           sourceId: c.caster.id,
@@ -1057,15 +1136,20 @@ export class AbilityModule implements GameModule {
 
   private inRange(hero: UnitState, ability: AbilityDef, target: AbilityTarget): boolean {
     if (ability.targeting === 'self') return true;
+    // The grown reach, not the printed one: an ability whose range rises with
+    // level has to be castable at that range, or it grows on paper and the
+    // click is still refused.
+    const level = (hero as { level?: number }).level ?? 1;
+    const range = abilityRange(ability, level);
     if (target.kind === 'unit') {
       const unit = this.units.get(target.id);
       if (!unit) return false;
-      const reach = ability.range + unit.radius;
+      const reach = range + unit.radius;
       if (dist2(hero.pos, unit.pos) > reach * reach) return false;
       // A spell aimed at a unit needs to see it, like an attack does.
       return !this.terrain || hasLineOfSight(this.terrain, hero, unit);
     }
-    if (target.kind === 'point') return dist2(hero.pos, target.pos) <= ability.range * ability.range;
+    if (target.kind === 'point') return dist2(hero.pos, target.pos) <= range * range;
     return false;
   }
 
@@ -1094,6 +1178,7 @@ export class AbilityModule implements GameModule {
     };
     const context: AbilityContext = {
       caster: hero,
+      level: hero.level,
       combat,
       units: this.units,
       ctx: this.ctx,

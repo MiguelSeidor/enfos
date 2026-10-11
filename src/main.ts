@@ -33,7 +33,13 @@ import {
   type AbilityDef,
   type AbilityTarget,
   type Command,
+  INVOCATIONS,
+  INVOCATION_IDS,
+  abilityRadius,
+  abilityRange,
   type GameplayBundle,
+  type InvocationId,
+  duoSetup,
   type MatchSetup,
 } from '@/gameplay';
 import type { NetSession } from '@/net/session';
@@ -52,6 +58,7 @@ import { preloadAuthored } from '@/units/build/authoredCharacter';
 import { HeroSelect, type HeroCard, type CommandSlot } from '@/ui';
 import { LevelPanel } from '@/ui/levelPanel';
 import { T1_STOCK, SABOTAGE_ITEMS } from '@/economy/items';
+import type { ShopKind } from '@/economy/economy';
 import { landmark, type LandmarkKind } from '@/world/layout';
 import { TerrainKey, RenderKey, UiKey, CombatKey } from '@/core/services';
 import { UnitKind } from '@/core/contracts';
@@ -98,6 +105,9 @@ async function main(): Promise<void> {
   /** Authoring mode: the map is loaded but no match is started. */
   const isEdit = params.has('edit');
   const showStats = params.get('stats') === '1';
+  // Offline 2v2 with an idle team-mate, for looking at the parts of the HUD
+  // that only appear when you have one. See `duoSetup`.
+  const duo = params.get('duo') === '1';
   // The showcase is the character line-up used for art review. It is off by
   // default now that real waves populate the map; `?showcase=1` brings it back.
   const showcase = params.get('showcase') === '1';
@@ -208,6 +218,8 @@ async function main(): Promise<void> {
       }),
     },
     useItem: (itemId) => sendCommand({ kind: 'use', itemId }),
+    giveGold: (toId, amount) => sendCommand({ kind: 'giveGold', toId, amount }),
+    giveItem: (toId, itemId) => sendCommand({ kind: 'giveItem', toId, itemId }),
     command: (id) => {
       if (id === 'match.leave') {
         // A clean slate: every module, the server connection and the room go
@@ -220,6 +232,10 @@ async function main(): Promise<void> {
       if (!h) return;
       const ui = engine.ctx.services.get(UiKey);
 
+      if (id === 'shop.sabotage') {
+        requestShopOpen('sabotage');
+        return;
+      }
       if (id === 'shop.close') {
         closeShop();
         // Focus returns to the hero: the camera follows again and the hero is
@@ -227,6 +243,12 @@ async function main(): Promise<void> {
         // whatever the shop click left selected.
         selectedUnit = null;
         rtsCamera.follow(h.id);
+        return;
+      }
+      if (id.startsWith('invoke.')) {
+        // Through the command path like everything else, so it is deterministic
+        // and crosses the network: a power that fires locally would desync.
+        sendCommand({ kind: 'invoke', id: id.slice(7) as InvocationId });
         return;
       }
       if (id.startsWith('buy.')) {
@@ -418,7 +440,13 @@ async function main(): Promise<void> {
     setAttackMove(false);
     aiming = { index, targeting: def.targeting };
     document.body.classList.add('is-aiming');
-    targetingOverlay.show(def.targeting === 'point' ? def.radius : 0, def.range);
+    // The circle has to be the one the hero actually has, or an ability that
+    // grew with level is aimed with the ring it had at level 1.
+    const lvl = h.level ?? 1;
+    targetingOverlay.show(
+      def.targeting === 'point' ? abilityRadius(def, lvl) : 0,
+      abilityRange(def, lvl),
+    );
   };
   const commitAim = (target: AbilityTarget): void => {
     if (aiming) sendCommand({ kind: 'cast', index: aiming.index, target });
@@ -503,6 +531,7 @@ async function main(): Promise<void> {
     rtsCamera,
     centreOnHero,
     beginCast,
+    (id) => sendCommand({ kind: 'invoke', id }),
     togglePause,
     (on) => {
       const next = on ?? !attackMove;
@@ -512,11 +541,12 @@ async function main(): Promise<void> {
     () => attackMove,
     () => aiming !== null,
     cancelAim,
+    () => requestShopOpen('sabotage'),
   );
   let selectedUnit: number | null = null;
   let hoveredUnit: number | null = null;
   /** Set once the shop module is registered; clicking a shop calls it. */
-  let requestShopOpen: () => void = () => {};
+  let requestShopOpen: (kind: ShopKind) => void = () => {};
   const worldPointer = setupOrders(
     engine,
     rtsCamera,
@@ -538,7 +568,8 @@ async function main(): Promise<void> {
       // can never be one the economy then refuses to serve.
       const near = (l: { u: number; v: number }): boolean =>
         Math.hypot(ground.x - sign * l.u, ground.z - l.v) < 10;
-      if (near(t1) || near(t2)) requestShopOpen();
+      if (near(t1)) requestShopOpen('hero');
+      else if (near(t2)) requestShopOpen('sabotage');
     },
     (pos) => hudModule.markMoveOrder(pos),
     (kind, sign) => {
@@ -546,7 +577,7 @@ async function main(): Promise<void> {
       // the other team, and clicking it must not open their shop.
       if (sign !== homeSign()) return false;
       if (kind !== 'shopProgression' && kind !== 'shopSabotage') return false;
-      requestShopOpen();
+      requestShopOpen(kind === 'shopProgression' ? 'hero' : 'sabotage');
       return true;
     },
     (hit) => {
@@ -555,6 +586,7 @@ async function main(): Promise<void> {
     },
     () => attackMove,
     () => setAttackMove(false),
+    (x, y) => hudModule.dropAt(x, y),
     sendCommand,
     {
       active: () => aiming?.targeting ?? null,
@@ -626,6 +658,8 @@ async function main(): Promise<void> {
       if (!h) return;
       const def = HEROES[h.defId];
       hudModel.heroName = def ? `${def.name}, ${def.title}` : h.defId;
+      hudModel.heroArt = h.defId;
+      hudModel.invocations = gameplay.invocations.status(h.id);
       hudModel.level = h.level;
       hudModel.health = Math.max(0, h.health);
       hudModel.maxHealth = h.stats.maxHealth;
@@ -639,6 +673,38 @@ async function main(): Promise<void> {
       hudModel.inventory = gameplay.economy
         .inventory(h)
         .map(({ item, count }) => ({ name: item.name, icon: item.icon, count, itemId: item.id }));
+
+      // Items on the field. Only this team's, and only while there are any:
+      // the common case is none, and the HUD then draws nothing at all.
+      hudModel.drops = [];
+      for (const drop of gameplay.economy.drops) {
+        if (drop.team !== h.team) continue;
+        hudModel.drops.push({
+          id: drop.id,
+          name: gameplay.economy.nameOf(drop.itemId),
+          pos: drop.pos,
+          // The economy's own test, so a marker lighting up is a promise the
+          // pick-up will keep.
+          inRange: gameplay.economy.inReach(h, drop),
+        });
+      }
+
+      // Team-mates, for the panel that hands them gold and items. Rebuilt per
+      // frame rather than cached: it is at most three entries, and the HUD
+      // compares the values it writes, so the cost is the allocation alone.
+      hudModel.allies = [];
+      for (const mate of match.heroes.values()) {
+        if (mate.id === h.id || mate.team !== h.team) continue;
+        const mateDef = HEROES[mate.defId];
+        hudModel.allies.push({
+          id: mate.id,
+          name: mateDef ? mateDef.name : mate.defId,
+          art: mate.defId,
+          health: Math.max(0, mate.health),
+          maxHealth: mate.stats.maxHealth,
+          alive: mate.alive,
+        });
+      }
 
       // Read from the resolved block, not from the base: this has to include
       // items and active buffs or the panel would contradict what the hero
@@ -670,6 +736,7 @@ async function main(): Promise<void> {
           key: a.key,
           name: `${a.name} — ${a.description}`,
           icon: a.icon,
+          art: a.id,
           cooldown: a.cooldown,
           cooldownLeft: 0,
         }));
@@ -710,6 +777,7 @@ async function main(): Promise<void> {
             kind: 'item',
             label: item.name,
             icon: item.icon,
+            art: item.id,
             tooltip: item.description + counterplay,
             cost: item.cost,
             currency: item.currency,
@@ -732,6 +800,7 @@ async function main(): Promise<void> {
             kind: 'ability',
             label: a.name,
             icon: a.icon,
+            art: a.id,
             // Description only. The tooltip renders `label` as its heading, so
             // prefixing the name here printed it twice.
             tooltip: a.description,
@@ -747,6 +816,34 @@ async function main(): Promise<void> {
             // and the button has to say which.
             disabled: h.mana < a.manaCost,
             reason: `Necesitas ${Math.ceil(a.manaCost - h.mana)} de maná más`,
+          });
+        }
+        // The player's own powers, in the same row as the kit.
+        //
+        // They used to sit under the purse as a pair of square buttons. They
+        // are abilities from where the player stands -- aimed at nothing, on a
+        // cooldown, fired under pressure -- so they belong where the hand
+        // already is, and every hero gets the same two in the same place.
+        for (const inv of gameplay.invocations.status(h.id)) {
+          const running = inv.activeLeft > 0;
+          slots.push({
+            id: `invoke.${inv.id}`,
+            kind: 'ability',
+            label: inv.name,
+            icon: inv.icon,
+            art: `invoke.${inv.id}`,
+            tooltip: `${inv.description} Cuesta ${inv.cost} de oro.`,
+            hotkey: inv.key,
+            // Shown as a cooldown so the card draws the same sweep it draws for
+            // a spell; while the effect runs, the number counts that down
+            // instead, because that is the deadline the player is playing to.
+            cooldown: running ? INVOCATIONS[inv.id].duration : INVOCATIONS[inv.id].cooldown,
+            cooldownLeft: running ? inv.activeLeft : inv.cooldownLeft,
+            cost: inv.cost,
+            currency: 'gold',
+            highlight: running,
+            disabled: inv.cooldownLeft > 0 || !inv.affordable,
+            reason: inv.cooldownLeft > 0 ? 'Aún no está lista' : 'Oro insuficiente',
           });
         }
         // The yellow cross. Present always so the card's shape does not jump,
@@ -964,24 +1061,32 @@ async function main(): Promise<void> {
   // "Open" now means the command card switches to the shop's stock rather than
   // a list panel appearing: a scrolling list of rows is a menu, and this is an
   // RTS — stock belongs in the same grid the hero's orders use.
-  let shopRequested = false;
+  //
+  // Which shop was asked for is remembered, rather than re-derived from where
+  // the hero stands: sabotage is usable from anywhere now, and deriving it
+  // would open the hero shop instead whenever the player happened to be
+  // standing at the counter when they pressed S.
+  let shopRequested: ShopKind | null = null;
   engine.add({
     id: 'shopSync',
     order: 865,
     init: () => {},
     update: () => {
       if (!gameplay) return;
-      const kind = gameplay.economy.shopInRange(gameplay.match.playerHero);
-      if (kind === null) shopRequested = false;
-      openShopKind = shopRequested ? kind : null;
+      // Walking away from a physical shop still closes it. Sabotage answers
+      // true from anywhere, so that card stays until the player closes it.
+      if (shopRequested && !gameplay.economy.canUse(gameplay.match.playerHero, shopRequested)) {
+        shopRequested = null;
+      }
+      openShopKind = shopRequested;
     },
   });
-  requestShopOpen = () => {
-    shopRequested = true;
+  requestShopOpen = (kind) => {
+    shopRequested = kind;
   };
   /** Shared by the card's close button and by walking out of range. */
   const closeShop = (): void => {
-    shopRequested = false;
+    shopRequested = null;
     openShopKind = null;
   };
 
@@ -994,7 +1099,7 @@ async function main(): Promise<void> {
       const h = gameplay?.match.playerHero;
       return h
         ? gameplay!.progression.allocated(h.id)
-        : { power: 0, vitality: 0, focus: 0 };
+        : { power: 0, vitality: 0, focus: 0, reach: 0 };
     },
     spend: (attribute) => {
       // Applied by the simulation on the next tick; the panel refreshes itself
@@ -1061,7 +1166,7 @@ async function main(): Promise<void> {
     // The title has to step aside, not just sit behind: both screens are full
     // -bleed overlays and the menu would otherwise render over the hero cards.
     title.setHidden(true);
-    void heroSelect.open().then((chosen) => startMatch(chosen));
+    void heroSelect.open().then((chosen) => startMatch(duo ? duoSetup(chosen, seed) : chosen));
   });
   title.on('options', () => {
     title.setHidden(true);
@@ -1212,6 +1317,7 @@ function buildHeroCards(): HeroCard[] {
         name: a.name,
         description: a.description,
         icon: a.icon,
+        art: a.id,
         cooldown: a.cooldown,
         manaCost: a.manaCost,
       })),
@@ -1307,6 +1413,8 @@ function setupOrders(
   attackMoveArmed: () => boolean,
   /** Clears the armed state once a click has consumed it. */
   disarmAttackMove: () => void,
+  /** The dropped item under a screen point, or null. */
+  dropAt: (x: number, y: number) => number | null,
   /** Sends a player command into the match. */
   send: (cmd: Command) => void,
   /** An aimed ability waiting for its target. */
@@ -1449,6 +1557,15 @@ function setupOrders(
           }
         }
         disarmAttackMove();
+        return;
+      }
+
+      // An item on the ground is picked up by clicking it. Before selection,
+      // because the marker is small and whatever is behind it is not what the
+      // player aimed at.
+      const dropId = dropAt(e.clientX, e.clientY);
+      if (dropId !== null) {
+        send({ kind: 'pickUp', dropId });
         return;
       }
 
@@ -1773,6 +1890,14 @@ function edgeAxis(pos: number, size: number, margin: number): number {
 const ABILITY_KEYS = ['KeyQ', 'KeyW', 'KeyE', 'KeyR'];
 
 /**
+ * Player powers, by key code. Built from the definitions so the letter printed
+ * on the button and the letter that fires it are the same one.
+ */
+const INVOCATION_KEYS: Record<string, InvocationId> = Object.fromEntries(
+  INVOCATION_IDS.map((id) => [`Key${INVOCATIONS[id].key}`, id]),
+) as Record<string, InvocationId>;
+
+/**
  * The physical key, which keeps QWER in place on any layout. Some input paths
  * (remote desktops, on-screen keyboards, automation) deliver an empty `code`;
  * those fall back to the character so the hotkeys still work there.
@@ -1788,12 +1913,16 @@ function setupInput(
   cam: RtsCamera,
   focusHero: () => void,
   castAbility: (index: number) => void,
+  /** Fires one of the player's own powers. */
+  invoke: (id: InvocationId) => void,
   togglePause: () => void,
   /** Arms or disarms attack-move. Omit the argument to flip it. */
   toggleAttackMove: (on?: boolean) => void,
   attackMoveArmed: () => boolean,
   aimArmed: () => boolean,
   cancelAim: () => void,
+  /** Opens the sabotage shop, which needs no building to stand at. */
+  openSabotage: () => void,
 ): void {
   const keys = new Set<string>();
   /**
@@ -1827,6 +1956,13 @@ function setupInput(
       e.preventDefault();
       return;
     }
+    // The sabotage shop, from anywhere on the field. S for sabotaje; the
+    // hero shop has no key because its stock has to be carried home anyway.
+    if (code === 'KeyS') {
+      openSabotage();
+      e.preventDefault();
+      return;
+    }
     // Attack-move. Arms a targeting mode; the next click either attacks what is
     // under it or, on open ground, sends the hero attacking toward that point.
     if (code === 'KeyA') {
@@ -1848,6 +1984,15 @@ function setupInput(
     const ability = ABILITY_KEYS.indexOf(code);
     if (ability >= 0) {
       castAbility(ability);
+      e.preventDefault();
+      return;
+    }
+    // Player powers. Routed through the same string the card's buttons send, so
+    // the key and the click cannot drift apart: one handler, one path to the
+    // simulation.
+    const invocation = INVOCATION_KEYS[code];
+    if (invocation) {
+      invoke(invocation);
       e.preventDefault();
     }
   });

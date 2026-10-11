@@ -11,13 +11,15 @@
  * with the balance table is worse than no card.
  */
 
-import { drawCrest, icon, type IconId } from './icons';
+import { drawCrest, glyph, heroPortrait, type IconId } from './icons';
 
 export interface HeroCardAbility {
   key: string;
   name: string;
   description: string;
   icon: IconId;
+  /** Ability id, for the painted plate. */
+  art?: string;
   cooldown: number;
   manaCost: number;
 }
@@ -73,9 +75,23 @@ export class HeroSelect {
     node.dataset.heroId = card.id;
     if (card.id === this.selected) node.classList.add('is-selected');
 
+    // The crest is still drawn underneath. It is what shows for a hero with no
+    // painted plate yet, and it costs one canvas.
     const portrait = document.createElement('canvas');
     portrait.className = 'hero-card-portrait';
     drawCrest(portrait, card.palette.primary, card.palette.accent, card.id.length * 7);
+    const painted = heroPortrait(card.id);
+    const portraitBox = document.createElement('div');
+    portraitBox.className = 'hero-card-portrait-box';
+    portraitBox.appendChild(portrait);
+    if (painted) {
+      const img = document.createElement('img');
+      img.className = 'hero-card-portrait-art';
+      img.src = painted;
+      img.alt = '';
+      img.draggable = false;
+      portraitBox.appendChild(img);
+    }
 
     const header = document.createElement('div');
     header.className = 'hero-card-head';
@@ -101,13 +117,13 @@ export class HeroSelect {
       const row = document.createElement('div');
       row.className = 'hero-ability';
       row.innerHTML =
-        `<span class="glyph">${icon(a.icon, 20)}</span>` +
+        `<span class="glyph">${glyph(a.art, a.icon, 20)}</span>` +
         `<span class="body"><b>${a.key} · ${a.name}</b><i>${a.description}</i></span>` +
         `<span class="cost">${a.cooldown}s · ${a.manaCost} mn</span>`;
       abilities.appendChild(row);
     }
 
-    node.append(portrait, header, blurb, vitals, abilities);
+    node.append(portraitBox, header, blurb, vitals, abilities);
     node.addEventListener('click', () => this.select(card.id));
     return node;
   }

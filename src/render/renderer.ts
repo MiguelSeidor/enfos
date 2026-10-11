@@ -200,6 +200,23 @@ export class RenderModule implements GameModule {
   private shadow!: FittedShadow;
 
   private tier: QualityTier = defaultQualityTier();
+  /**
+   * The tier the player chose, which is a ceiling rather than a setting.
+   *
+   * The governor below may run under it when the frame cannot keep up, and
+   * climbs back when it can, but never above: picking `medium` means medium is
+   * the best this machine will be asked to do.
+   */
+  private requestedTier: QualityTier = defaultQualityTier();
+  /** Recent frame deltas, for the governor. */
+  private readonly deltas: number[] = [];
+  /** Seconds since the last automatic change, so it cannot oscillate. */
+  private sinceChange = 0;
+  /** Presentation clock, for the penalties below. */
+  private clock = 0;
+  /** A tier that failed is off limits until this time, and longer each time. */
+  private readonly blockedUntil = new Map<QualityTier, number>();
+  private readonly penaltySeconds = new Map<QualityTier, number>();
   private mood: MoodPreset = MOOD_AMBER_STORM;
   private readonly projVec = new THREE.Vector3();
   private width = 1920;
@@ -237,7 +254,18 @@ export class RenderModule implements GameModule {
     const service: RenderService = {
       scene: this.scene,
       camera: this.camera,
-      setQuality: (tier) => this.applyQuality(tier),
+      setQuality: (tier) => {
+        // A manual choice resets the ceiling and the governor's patience: the
+        // player has just told us what they want, so start from there.
+        this.requestedTier = tier;
+        this.sinceChange = 0;
+        this.deltas.length = 0;
+        // A manual choice also forgives the penalties: the player may have just
+        // changed something that makes the tier affordable again.
+        this.blockedUntil.clear();
+        this.penaltySeconds.clear();
+        this.applyQuality(tier);
+      },
       get quality(): QualityTier {
         return self.tier;
       },
@@ -278,6 +306,23 @@ export class RenderModule implements GameModule {
     this.aoPass.configuration.distanceFalloff = 1.4;
     this.aoPass.configuration.intensity = 2.6;
     this.aoPass.configuration.denoiseSamples = 8;
+    // Transparency awareness off, and this one line is worth three times the
+    // frame rate.
+    //
+    // Measured on a paused field of 51 creeps: with it the frame sits at 35.6
+    // ms and without it at 12.3, which is within noise of turning ambient
+    // occlusion off entirely (11.8). None of the pass's other knobs move it at
+    // all -- eight samples cost the same as sixty-four, and half resolution
+    // saves one millisecond -- because the cost is not sampling. The
+    // transparency-aware path re-renders the scene into two more targets, one
+    // with depth writes and one without, so it scales with how much is on the
+    // field and ignores every quality setting there is.
+    //
+    // What it buys is occlusion that reads transparent surfaces correctly.
+    // Compared frame to frame at wave 14 the two images are indistinguishable:
+    // this scene's transparent things are the Core crystal, which is lit from
+    // inside, and particle effects, which nobody expects to occlude.
+    this.aoPass.configuration.transparencyAware = false;
     this.aoPass.configuration.denoiseRadius = 12;
     // Occlusion tinted toward the shadow colour rather than pure black, so
     // creases pick up the same cool cast as cast shadows do.
@@ -367,6 +412,77 @@ export class RenderModule implements GameModule {
     this.composer.addPass(new EffectPass(this.camera, new OpaqueOutputEffect()));
   }
 
+  /**
+   * Drops the tier when the frame cannot hold, and climbs back when it can.
+   *
+   * Measured on 2026-10-04 with 52 creeps on the field: the post chain is what
+   * costs, not the creatures. Dropping from the top tier to the bottom took the
+   * frame from about 44 ms to 12.7, while hiding every authored mesh saved 13
+   * and turning off the whole shadow map saved 5. Ambient occlusion and bloom
+   * are paid per pixel rather than per creature, so they do not grow with the
+   * wave -- the frame is already near the budget and the wave pushes it over.
+   * That is exactly the shape a governor fixes: give the picture back the
+   * moment the field clears.
+   *
+   * `dt` rather than a measured render time on purpose. Under vsync a frame
+   * that takes 5 ms still arrives every 16.7, so render time cannot tell a
+   * comfortable frame from a tight one, while `dt` growing past the refresh is
+   * precisely the thing the player feels as a stutter.
+   *
+   * It moves through `applyQuality` and never touches the passes directly,
+   * because that is where the composer's buffers are resized to follow the
+   * pixel ratio. Reaching past it is what drew the whole scene twice, offset.
+   */
+  private governQuality(dt: number): void {
+    this.clock += dt;
+    this.sinceChange += dt;
+    // Ignore the first frames after any change: a tier switch recompiles
+    // shaders, and that spike is not a verdict on the new tier.
+    if (this.sinceChange < 1.5) {
+      this.deltas.length = 0;
+      return;
+    }
+    this.deltas.push(dt);
+    if (this.deltas.length < 90) return;
+
+    const sorted = [...this.deltas].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)]!;
+    this.deltas.length = 0;
+
+    const ladder: QualityTier[] = ['low', 'medium', 'high', 'ultra'];
+    const at = ladder.indexOf(this.tier);
+    const ceiling = ladder.indexOf(this.requestedTier);
+
+    // Below 45 fps the picture is not worth the stutter.
+    if (median > 1 / 45 && at > 0) {
+      const leaving = this.tier;
+      // Remember that this tier failed, and for longer each time. Without it
+      // the governor pumps: at `low` the frame finishes early, which satisfies
+      // the climb test, so it goes back to `medium`, drowns, and drops again --
+      // measured doing exactly that, low to medium and back four times in
+      // fifteen seconds. Headroom at a cheap tier says nothing about whether
+      // the expensive one will cope.
+      // Starts at half a minute rather than ten seconds: a retry that fails
+      // costs the player a visibly bad window, so the first one should not come
+      // round while the wave that caused it is still on the field.
+      const penalty = Math.min(180, (this.penaltySeconds.get(leaving) ?? 15) * 2);
+      this.penaltySeconds.set(leaving, penalty);
+      this.blockedUntil.set(leaving, this.clock + penalty);
+      this.applyQuality(ladder[at - 1]!);
+      this.sinceChange = 0;
+      return;
+    }
+
+    // Climb only from real headroom, not from merely coping: 1/58 is a frame
+    // that is finishing early and waiting for the refresh. And only into a tier
+    // that is not still serving its sentence.
+    const next = ladder[at + 1];
+    if (median < 1 / 58 && at < ceiling && next && (this.blockedUntil.get(next) ?? 0) <= this.clock) {
+      this.applyQuality(next);
+      this.sinceChange = 0;
+    }
+  }
+
   applyQuality(tier: QualityTier): void {
     this.tier = tier;
     const q = QUALITY[tier];
@@ -443,6 +559,7 @@ export class RenderModule implements GameModule {
   }
 
   update(dt: number): void {
+    this.governQuality(dt);
     this.lights.followCamera(this.camera);
     this.camera.updateMatrixWorld();
     this.shadow.update(this.camera, this.lights.sunDirection);

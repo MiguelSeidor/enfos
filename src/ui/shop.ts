@@ -10,7 +10,7 @@
  * open shop costs nothing per frame beyond a handful of class toggles.
  */
 
-import { icon } from './icons';
+import { glyph as paint } from './icons';
 import { setTip } from './tooltip';
 import type { ShopItem } from '@/economy/items';
 
@@ -88,7 +88,7 @@ export class ShopPanel {
 
       const glyph = document.createElement('span');
       glyph.className = 'shop-icon';
-      glyph.innerHTML = icon(item.icon, 22);
+      glyph.innerHTML = paint(item.id, item.icon, 22);
 
       const body = document.createElement('span');
       body.className = 'shop-body';

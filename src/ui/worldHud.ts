@@ -42,6 +42,12 @@ const MARKER_LIFE = 1.1;
 /** How long a scattered coin lives before fading, in seconds. */
 const COIN_LIFE = 1.5;
 
+/** Seconds per breath of a dropped item's pulse. */
+const DROP_PULSE = 1.7;
+
+/** Click radius around a dropped item, in CSS pixels. */
+const DROP_HIT = 20;
+
 /**
  * Coin capacity.
  *
@@ -93,6 +99,11 @@ export class WorldHud {
    * near Y=0. Without adding ground height, bars and numbers render at sea
    * level, which on this map means well below the unit they belong to.
    */
+  private drops: { id: number; name: string; pos: Vec2; inRange: boolean }[] = [];
+  /** Screen circles the last frame drew, so a click can hit one. */
+  private readonly dropHits: { id: number; x: number; y: number }[] = [];
+  private dropClock = 0;
+
   constructor(private readonly groundAt: (x: number, z: number) => number) {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'hud-world';
@@ -343,6 +354,8 @@ export class WorldHud {
 
     this.drawLandmarkLabels(render);
     this.drawMoveMarker(dt, render);
+    // Under the units: a creep walking over a dropped shield should cover it.
+    this.drawDrops(dt, render);
     // Hover under selection: a unit that is both keeps the stronger red ring.
     if (hoveredId !== null && hoveredId !== selectedId) {
       this.drawRing(match, render, hoveredId, 'rgba(255, 214, 122, 0.95)', 2);
@@ -357,6 +370,100 @@ export class WorldHud {
   /** Landmark markers the player needs to find: Core, fountain, both shops. */
   setLandmarks(marks: { text: string; pos: Vec2; accent: string }[]): void {
     this.landmarks = marks;
+  }
+
+  /** Items lying on the ground, from the economy. Replaced, not accumulated. */
+  setDrops(drops: { id: number; name: string; pos: Vec2; inRange: boolean }[]): void {
+    this.drops = drops;
+  }
+
+  /**
+   * The dropped item under a screen point, or null.
+   *
+   * Hit-tested against the circles the last frame drew rather than by
+   * projecting again: the player clicks what they can see, and a marker that
+   * has scrolled off since is not something they could have aimed at.
+   */
+  dropAt(x: number, y: number): number | null {
+    for (const hit of this.dropHits) {
+      const dx = x - hit.x;
+      const dy = y - hit.y;
+      if (dx * dx + dy * dy <= DROP_HIT * DROP_HIT) return hit.id;
+    }
+    return null;
+  }
+
+  /**
+   * Items on the ground: a pouch and the item's name.
+   *
+   * Out of reach they are dimmed rather than hidden — the player has to be
+   * able to see where the thing they dropped went from across the lane, or
+   * "it falls on the ground" is indistinguishable from "it is gone".
+   */
+  private drawDrops(dt: number, render: RenderService): void {
+    this.dropHits.length = 0;
+    if (this.drops.length === 0) return;
+    this.dropClock += dt;
+    const g = this.g;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = "600 11px 'Trebuchet MS', system-ui, sans-serif";
+    // A slow breath, so the eye catches it without the field flashing.
+    const pulse = 0.5 + 0.5 * Math.sin((this.dropClock / DROP_PULSE) * Math.PI * 2);
+
+    for (const drop of this.drops) {
+      const ground = this.groundAt(drop.pos.x, drop.pos.z);
+      if (!render.project(drop.pos, ground + 1.15, this.screen)) continue;
+      const x = this.screen.x;
+      const y = this.screen.y;
+      this.dropHits.push({ id: drop.id, x, y });
+
+      g.globalAlpha = drop.inRange ? 1 : 0.55;
+
+      // The glow first, so the pouch sits on top of its own light.
+      const halo = 9 + pulse * 3;
+      const grad = g.createRadialGradient(x, y, 0, x, y, halo);
+      grad.addColorStop(0, drop.inRange ? 'rgba(255, 220, 140, 0.55)' : 'rgba(180, 190, 210, 0.3)');
+      grad.addColorStop(1, 'rgba(255, 220, 140, 0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(x, y, halo, 0, Math.PI * 2);
+      g.fill();
+
+      // A pouch: a rounded body with a drawn neck. Six lines, and it reads as
+      // a thing somebody left rather than as a quest marker.
+      g.beginPath();
+      g.moveTo(x - 4.5, y + 1);
+      g.quadraticCurveTo(x - 6, y + 6, x, y + 6.5);
+      g.quadraticCurveTo(x + 6, y + 6, x + 4.5, y + 1);
+      g.lineTo(x + 2.4, y - 2.6);
+      g.lineTo(x - 2.4, y - 2.6);
+      g.closePath();
+      g.fillStyle = drop.inRange ? '#c8a253' : '#8a8f9b';
+      g.fill();
+      g.lineWidth = 1;
+      g.strokeStyle = 'rgba(28, 20, 8, 0.9)';
+      g.stroke();
+      g.beginPath();
+      g.moveTo(x - 2.8, y - 2.6);
+      g.lineTo(x + 2.8, y - 2.6);
+      g.strokeStyle = drop.inRange ? '#f5dda2' : '#c3c8d2';
+      g.lineWidth = 1.6;
+      g.stroke();
+
+      // The name above it, on the same plate the landmarks use.
+      const w = g.measureText(drop.name).width + 12;
+      const ly = y - 16;
+      g.fillStyle = 'rgba(6, 9, 14, 0.72)';
+      g.fillRect(x - w / 2, ly - 8, w, 16);
+      g.strokeStyle = drop.inRange ? '#c8a253' : 'rgba(170, 178, 192, 0.8)';
+      g.lineWidth = 1;
+      g.strokeRect(x - w / 2 + 0.5, ly - 7.5, w - 1, 15);
+      g.fillStyle = drop.inRange ? '#f5dda2' : '#c3c8d2';
+      g.fillText(drop.name, x, ly + 0.5);
+
+      g.globalAlpha = 1;
+    }
   }
 
   private drawLandmarkLabels(render: RenderService): void {

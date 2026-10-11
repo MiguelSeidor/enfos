@@ -325,6 +325,23 @@ export const CONSUMABLE_ITEMS: ShopItem[] = [
     ],
   },
   {
+    id: 'book.reach',
+    name: 'Tratado de destreza',
+    description: 'Permanente: +6 % velocidad de ataque y +8 % alcance (hasta el tope de alcance).',
+    icon: 'arrow',
+    kind: 'book',
+    // Dearer than the other three. They buy a flat number; this one buys a
+    // percentage, so it is worth more to a hero who has already invested in the
+    // same axis, and the attack speed compounds with everything else.
+    cost: 420,
+    currency: 'gold',
+    tier: 1,
+    modifiers: [
+      { stat: 'attackSpeed', op: 'pct', value: 0.06, sourceId: 'book.reach' },
+      { stat: 'attackRange', op: 'pct', value: 0.08, sourceId: 'book.reach' },
+    ],
+  },
+  {
     id: 'book.experience',
     name: 'Tomo de experiencia',
     description: 'Otorga 600 de experiencia.',

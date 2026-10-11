@@ -27,8 +27,33 @@ import { runtimeOf, type UnitModule } from './units';
 import { pow } from '@/core/detmath';
 
 export const WAVES_TOTAL = 60;
-/** Seconds of preparation before the first wave and between waves. */
-export const INTERMISSION = 20;
+/**
+ * Seconds of preparation before the first wave and between waves.
+ *
+ * Kept as the floor of the scale below, because that is what it is: the gap a
+ * full team of three gets, where three heroes clear a lane fast enough that a
+ * longer pause is dead time.
+ */
+export const INTERMISSION = 30;
+
+/**
+ * How long the gap is, by how many defenders share a site.
+ *
+ * It scales because clearing speed does. Alone against the machine, or in a
+ * 1v1, one hero has to walk the whole lane, go back to the fountain and return,
+ * and 20 seconds did not cover it -- the pressure stopped coming from the wave
+ * and started coming from the travel. Two heroes halve that problem and three
+ * remove it, so the gap shrinks to match rather than handing a bigger team a
+ * free rest their extra hands have already earned.
+ *
+ * This is also what makes Parar el Tiempo a choice rather than a necessity: it
+ * buys a breather on top of a gap that is already enough to survive on.
+ */
+export function intermissionFor(teamSize: number): number {
+  if (teamSize >= 3) return 30;
+  if (teamSize === 2) return 45;
+  return 60;
+}
 const BOSS_EVERY = 10;
 
 export interface WavePlan {
@@ -36,6 +61,8 @@ export interface WavePlan {
   entries: { defKey: string; count: number }[];
   difficulty: number;
   isBoss: boolean;
+  /** Boss waves only: multiplies how many minions each boss raises, and its cap. */
+  bossSummons?: number;
   /** Sudden death: past the last authored wave, with the overtime multipliers. */
   sudden: boolean;
   /** Seconds between individual spawns. */
@@ -68,12 +95,64 @@ const SUDDEN_STEP = 0.35;
  *   wave 60 → 1953 pts ≈ 195
  */
 function budgetFor(wave: number): number {
-  return 60 + wave * 20 + pow(wave, 1.6);
+  // Raised by a quarter in the linear term only. Count is the expensive axis:
+  // the frame was measured dying at about fifty creatures on the field, and
+  // the quality governor is already dropping tiers to cope. Making waves
+  // harder by sending more bodies buys difficulty with stutter.
+  return 60 + wave * 25 + pow(wave, 1.6);
 }
 
-/** Stat multiplier. Sub-exponential; doubles roughly every 18 waves. */
+/**
+ * Stat multiplier. Sub-exponential; doubles roughly every thirteen waves.
+ *
+ * Steepened from 1.04 on 2026-10-08. With attack speed and reach now buyable
+ * every level, wave 39 went from the owner's hard ceiling to a stroll: the
+ * hero's power curve had gained an axis and the wave's had not. At wave 39 this
+ * is 8.9 against the old 5.1, so a creep hits and survives nearly twice as
+ * hard, and none of it costs a frame.
+ */
 function difficultyFor(wave: number): number {
-  return pow(1.04, wave) + wave * 0.012;
+  return pow(1.055, wave) + wave * 0.02;
+}
+
+/**
+ * The boss fight at each tenth wave: how many, how hard, and how fast they
+ * raise their dead.
+ *
+ * Authored as a table rather than a formula because it is a sequence of set
+ * pieces, and the owner wrote it as one. A single dragon that dies in twelve
+ * seconds without the player spending an ability is not a boss; by wave 60 the
+ * answer should be four of them, six times as strong, each coming down its own
+ * lane so the player cannot hold one choke and win.
+ *
+ * `power` multiplies the wave's own difficulty, so it stacks on top of the
+ * natural curve rather than replacing it.
+ */
+const BOSS_ESCALATION: { count: number; power: number; summons: number }[] = [
+  { count: 1, power: 2, summons: 4 }, // wave 10
+  { count: 1, power: 4, summons: 4 }, // wave 20
+  { count: 2, power: 4, summons: 8 }, // wave 30
+  { count: 2, power: 8, summons: 8 }, // wave 40
+  { count: 4, power: 8, summons: 16 }, // wave 50
+  { count: 4, power: 12, summons: 24 }, // wave 60
+];
+
+/**
+ * How many minions a boss may hold on the field at once, whatever its scale
+ * says.
+ *
+ * The scale multiplies both how many it raises per cast and its own cap, and
+ * at the top of the ladder that is twenty-four times a cap of nine: two hundred
+ * and sixteen skeletons, per dragon, with four dragons. That is not a harder
+ * fight, it is the frame dying -- and it works directly against wanting more
+ * creeps on the field at all. The scale still makes them arrive far faster and
+ * replace their dead instantly, which is the part that is felt.
+ */
+export const SUMMON_CAP = 24;
+
+export function bossPlanFor(wave: number): { count: number; power: number; summons: number } {
+  const step = BOSS_ESCALATION[Math.floor(wave / BOSS_EVERY) - 1];
+  return step ?? BOSS_ESCALATION[BOSS_ESCALATION.length - 1]!;
 }
 
 /**
@@ -93,11 +172,18 @@ export function planWave(wave: number, seed: number, teamSize = 1): WavePlan {
   const difficulty = difficultyFor(wave) * (1 + SUDDEN_STEP * overtime);
 
   if (isBoss) {
+    const boss = bossPlanFor(wave);
     return {
       wave,
-      // One boss per defender: three heroes make short work of a single one.
-      entries: [{ defKey: 'marrowTitan', count: Math.max(1, teamSize) }],
-      difficulty: difficulty * 0.85,
+      // The table's count, times one per defender: three heroes make short work
+      // of a single dragon, and the table is written for a lone defender.
+      entries: [{ defKey: 'marrowTitan', count: boss.count * Math.max(1, teamSize) }],
+      // Relative to the FIRST dragon, not compounded onto the wave curve.
+      // Compounding read as obedient and was not: at wave 60 it gave a dragon
+      // with 690,000 health, eighty times the opening one, where the table asks
+      // for six. The boss ladder is its own curve and replaces the wave's.
+      difficulty: difficultyFor(BOSS_EVERY) * 0.85 * boss.power,
+      bossSummons: boss.summons,
       isBoss: true,
       sudden: false,
       interval: 0.6,
@@ -192,7 +278,22 @@ export class WaveModule implements GameModule {
   /** How many lane forks each site has; set by the match module. */
   laneCount = 1;
   /** Defenders per site. Waves grow with it, so 2v2 and 3v3 are not easier. */
-  teamSize = 1;
+  private teamSizeValue = 1;
+
+  /**
+   * Defenders per site. Setting it also retimes the gap that is currently
+   * running: the match sets this during setup, while the first intermission is
+   * already counting down from the constant.
+   */
+  get teamSize(): number {
+    return this.teamSizeValue;
+  }
+
+  set teamSize(n: number) {
+    const was = this.teamSizeValue;
+    this.teamSizeValue = n;
+    if (!this.running && was !== n) this.timer = intermissionFor(n);
+  }
   /** Called when the intermission after the final wave runs out. */
   onAllWavesSurvived: (() => void) | null = null;
   /** Overtime: waves keep coming, faster and harder, until a Core falls. */
@@ -291,7 +392,7 @@ export class WaveModule implements GameModule {
   }
 
   startWave(wave: number): void {
-    const plan = planWave(wave, this.ctx.match.seed, this.teamSize);
+    const plan = planWave(wave, this.ctx.match.seed, this.teamSizeValue);
     this.plan = plan;
     this.running = true;
     this.cleared.clear();
@@ -310,9 +411,11 @@ export class WaveModule implements GameModule {
     for (const entry of plan.entries) {
       for (let i = 0; i < entry.count; i++) {
         // Cycle the routes so both portals fire together and both branches
-        // around the base get used. A boss is the exception: one unit cannot
-        // be split across routes, so it always takes route 0.
-        sequence.push({ defKey: entry.defKey, route: plan.isBoss ? 0 : route % this.laneCount, jx: 0, jz: 0 });
+        // around the base get used. Bosses cycle too, now that a late wave
+        // sends four of them: holding one choke should not answer the whole
+        // fight. A single boss still lands on route 0, which is what the old
+        // special case was really protecting.
+        sequence.push({ defKey: entry.defKey, route: route % this.laneCount, jx: 0, jz: 0 });
         route++;
       }
     }
@@ -347,13 +450,20 @@ export class WaveModule implements GameModule {
       isBoss: plan.isBoss,
       sudden: plan.sudden,
     });
+    // A concealed creep cannot be auto-acquired and is not drawn until it
+    // strikes, so a player who is not told it is coming learns about it by
+    // losing health from nothing. Announcing the wave is the only warning the
+    // mechanic allows without undoing itself.
+    const hidden = plan.entries.some((e) => ENEMIES[e.defKey]?.traits?.invisible);
     this.ctx.bus.emit('ui:notify', {
       text: plan.sudden
         ? 'MUERTE SÚBITA — el doble de rápidos, el doble de daño'
         : plan.isBoss
           ? `Oleada ${wave} — JEFE`
-          : `Oleada ${wave}`,
-      severity: plan.isBoss || plan.sudden ? 'danger' : 'warn',
+          : hidden
+            ? `Oleada ${wave} — enemigos ocultos`
+            : `Oleada ${wave}`,
+      severity: plan.isBoss || plan.sudden || hidden ? 'danger' : 'warn',
     });
   }
 
@@ -394,6 +504,15 @@ export class WaveModule implements GameModule {
         spawn.route,
       );
       if (this.plan!.sudden) this.makeSudden(unit);
+      // Written onto the runtime rather than passed through `spawnEnemy`,
+      // because the trait it scales does not exist yet: a dragon raises nothing
+      // until its health drops it into the second phase, and the phase replaces
+      // its traits wholesale. A number on the runtime survives that.
+      const scale = this.plan!.bossSummons;
+      if (scale && scale > 1) {
+        const rt = runtimeOf(unit.id);
+        if (rt) rt.summonScale = scale;
+      }
     }
 
     // The clock starts the moment the wave has finished *arriving*, not when
@@ -401,7 +520,7 @@ export class WaveModule implements GameModule {
     // that could not clear them — which is the pressure the mode is built on.
     if (this.queue.length === 0) {
       this.running = false;
-      this.timer = INTERMISSION;
+      this.timer = intermissionFor(this.teamSize);
       ctx.match.phase = 'intermission';
     }
   }

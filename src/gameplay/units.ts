@@ -59,6 +59,14 @@ export interface UnitRuntime {
   /** Ids this unit has summoned and that may still be alive. */
   summoned?: EntityId[];
   /**
+   * Multiplies how many minions this unit raises at once, and its cap.
+   *
+   * Set on bosses by the wave module. It is not part of the trait because the
+   * trait arrives from a boss phase and is replaced whole each time the fight
+   * escalates; a scale that lived there would be overwritten at 70 % health.
+   */
+  summonScale?: number;
+  /**
    * Seconds of visibility remaining after striking. Only used when
    * `traits.invisible`; at or below zero the unit is unseen.
    */
@@ -85,13 +93,118 @@ const runtimes = new Map<EntityId, UnitRuntime>();
  * run out. Everything else is always visible, so the common case is one map
  * lookup and a couple of undefined checks.
  */
-export function isConcealed(id: EntityId): boolean {
+export function isConcealed(id: EntityId, observerTeam?: number, tick = 0): boolean {
   const runtime = runtimes.get(id);
-  return !!runtime?.traits?.invisible && (runtime.revealFor ?? 0) <= 0;
+  if (!runtime?.traits?.invisible || (runtime.revealFor ?? 0) > 0) return false;
+  // Concealment is a fact about the unit; seeing through it is a fact about who
+  // is looking, so the observer has to be part of the question.
+  return !hasTrueSight(observerTeam, tick);
+}
+
+/**
+ * Per-site effects a player invocation can switch on. Owner: `invocations.ts`,
+ * which is the only thing that writes them.
+ *
+ * They live here rather than in that module because movement, combat and target
+ * acquisition all have to read them and all three already import this file.
+ * Putting them the other way round makes a cycle, because `invocations.ts`
+ * needs `runtimeOf` to know which site a creep belongs to.
+ *
+ * Both are deadlines in simulation ticks, not countdowns: a deadline needs no
+ * upkeep, survives a save and restore unchanged, and cannot drift.
+ */
+// Keyed by number, not by `TeamId`: a creep carries team -1 and a lookup with
+// it has to be legal and simply miss, rather than need a cast at every call.
+const frozenUntil = new Map<number, number>();
+const sightUntil = new Map<number, number>();
+
+export function siteFrozenUntil(): Map<number, number> {
+  return frozenUntil;
+}
+
+export function trueSightUntil(): Map<number, number> {
+  return sightUntil;
+}
+
+export function freezeSite(team: number, untilTick: number): void {
+  frozenUntil.set(team, Math.max(frozenUntil.get(team) ?? 0, untilTick));
+}
+
+export function grantTrueSight(team: number, untilTick: number): void {
+  sightUntil.set(team, Math.max(sightUntil.get(team) ?? 0, untilTick));
+}
+
+/**
+ * Is this creep held still by a freeze on the site it is attacking?
+ *
+ * Keyed on the site the creep marches against, not on its own team: creeps are
+ * hostile to everyone and carry team -1, so the thing that makes a freeze
+ * one-sided in a 1v1 is which lane the creep belongs to.
+ */
+export function isFrozen(id: EntityId, tick: number): boolean {
+  const runtime = runtimes.get(id);
+  if (!runtime) return false;
+  // Heroes carry a `siteTeam` too -- it is which site they defend -- so a
+  // freeze keyed on the site alone stopped the hero who paid for it dead. The
+  // power buys time to act, so the one unit that must keep acting is excluded.
+  if (runtime.behavior === 'hero') return false;
+  return (frozenUntil.get(runtime.siteTeam) ?? 0) > tick;
+}
+
+export function hasTrueSight(team: number | undefined, tick: number): boolean {
+  if (team === undefined) return false;
+  return (sightUntil.get(team) ?? 0) > tick;
+}
+
+/**
+ * Where along the lane a unit spawned at `pos` should pick the route up.
+ *
+ * Everything used to start at waypoint 0, which is right for a creep walking
+ * out of its portal and wrong for anything born anywhere else. A boss raises
+ * its minions where it stands, often most of the way down the lane, and they
+ * were handed waypoint 0 -- so they turned round and walked back to the start,
+ * straight into the wave coming the other way, which is what jammed them.
+ *
+ * The rule is the nearest waypoint, then one past it, because the nearest one
+ * is usually just behind a unit standing on the path and walking backwards to
+ * touch it is the whole bug.
+ */
+function laneIndexNear(lane: Vec2[], pos: Vec2): number {
+  if (lane.length === 0) return 0;
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < lane.length; i++) {
+    const p = lane[i]!;
+    const d = (p.x - pos.x) * (p.x - pos.x) + (p.z - pos.z) * (p.z - pos.z);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  // Within a waypoint's own radius, that waypoint counts as reached.
+  const reached = bestD < 2.4 * 2.4;
+  return Math.min(lane.length - 1, reached ? best + 1 : best);
 }
 
 export function runtimeOf(id: EntityId): UnitRuntime | undefined {
   return runtimes.get(id);
+}
+
+/**
+ * Extra health every creep gets, on top of the wave's difficulty.
+ *
+ * It ramps, and the first version did not. A flat doubling was applied from
+ * wave one and turned the opening from too soft into a wall: the owner went
+ * from clearing the game without blinking to not being able to kill the first
+ * creeps. The complaint was never that early waves were trivial, it was that
+ * creeps melted once the hero had bought attack speed -- which happens later,
+ * because the points have to be earned first.
+ *
+ * So the ramp follows the hero's own curve rather than leading it: nothing at
+ * wave one, half by wave ten, full from twenty on.
+ */
+function toughnessFor(wave: number): number {
+  return 1 + Math.min(1, Math.max(0, (wave - 1) / 19));
 }
 
 export class UnitModule implements GameModule {
@@ -142,7 +255,14 @@ export class UnitModule implements GameModule {
     const character = getCharacter(def.characterId);
 
     const base = { ...def.stats };
-    base.maxHealth = Math.round(base.maxHealth * difficulty);
+    // Health is scaled harder than damage, and that split is the point.
+    //
+    // The owner's reading after playing Talon: creeps die before they arrive,
+    // but five or six of them around the hero still take a real bite out of it.
+    // So the threat is right and the durability is not, and raising one
+    // multiplier would have raised both. Damage and armour keep the wave's own
+    // curve; health takes it twice over.
+    base.maxHealth = Math.round(base.maxHealth * difficulty * toughnessFor(this.ctx.match.wave));
     base.attackDamage = Math.round(base.attackDamage * difficulty);
     base.armor = Math.round(base.armor * Math.sqrt(difficulty));
     // Pacing dial, applied here so it covers every enemy definition at once and
@@ -176,7 +296,7 @@ export class UnitModule implements GameModule {
     const lane = this.terrain.lanePath(laneTeam, route);
     runtimes.set(unit.id, {
       siteTeam: laneTeam,
-      laneIndex: 0,
+      laneIndex: laneIndexNear(lane, pos),
       lane,
       behavior: def.behavior,
       bounty: def.bounty,

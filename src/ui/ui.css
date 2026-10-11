@@ -525,6 +525,10 @@ body.is-usable:not(.is-targeting) canvas {
   right: 0.9rem;
   display: flex;
   gap: 0.5rem;
+  /* Wraps so the invocations drop onto their own line under the purse instead
+     of sitting beside it and pushing the counters off the corner. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .res {
@@ -536,6 +540,27 @@ body.is-usable:not(.is-targeting) canvas {
   font-size: 0.95rem;
   /* Anchor for the gain readout below it. */
   position: relative;
+}
+
+/* The influence counter is a button: sabotage is bought with influence and is
+   usable from anywhere on the field, so the counter is the door to that shop.
+   `.ui-panel` paints it; only the browser'"'"'s own button chrome has to go. */
+button.res {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: filter 120ms ease;
+}
+
+button.res:hover {
+  filter: brightness(1.28);
+}
+
+button.res:active {
+  filter: brightness(0.92);
 }
 
 /* Gold gains, stacked directly under the counter.
@@ -594,11 +619,283 @@ body.is-usable:not(.is-targeting) canvas {
 .res.gold .dot { background: #e3b34a; color: #e3b34a; }
 .res.influence .dot { background: #9a5fd0; color: #9a5fd0; }
 
-/* Core integrity, top left. */
-.hud-core {
+/* ── The top-left column: Core integrity, then the team-mates ─────────────
+   Stacked rather than each pinned to the corner, so the ally cards sit under
+   the Core box at every root font size without a magic offset that only
+   happens to clear it at one of them. Transparent to clicks; the panels
+   inside take their own. */
+.hud-left {
   position: absolute;
   top: 0.9rem;
   left: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  /* Stretched, not shrink-wrapped: the column is as wide as the Core box and
+     the ally cards take that width, so the two panels share an edge on both
+     sides instead of one hanging 20 px past the other. */
+  align-items: stretch;
+  gap: 0.4rem;
+  pointer-events: none;
+}
+
+.hud-left > * {
+  pointer-events: auto;
+}
+
+/* One card per ally: portrait, name, health, and the button that hands them
+   gold. Hidden outright when the team is one player, which is most matches —
+   an empty frame in the corner would be a promise the mode does not keep. */
+.hud-allies {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.hud-allies.is-hidden {
+  display: none;
+}
+
+.ally {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.55rem;
+  /* The column decides the width. A floor for the case where the Core box is
+     narrower than a hero's name and a health bar need. */
+  min-width: 13.5rem;
+  box-sizing: border-box;
+  /* The drop highlight grows a ring; a transition keeps that from flickering
+     as the pointer crosses the children. */
+  transition: box-shadow 120ms ease, border-color 120ms ease;
+}
+
+/* Dead team-mates stay on the panel: the player needs to see the body is cold,
+   and the card going missing reads as a disconnect rather than a death. */
+.ally.is-dead {
+  opacity: 0.55;
+  filter: saturate(0.3);
+}
+
+.ally-portrait {
+  position: relative;
+  width: 2.9rem;
+  height: 2.9rem;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--ui-edge);
+  border-radius: 2px;
+  background: #11151d;
+}
+
+.ally-portrait canvas,
+.ally-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* No `object-position`: the portraits are square and already framed, so the
+   same plain cover the hero box uses gives the same crop, smaller. */
+.ally-art {
+  object-fit: cover;
+}
+
+.ally-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.ally-name {
+  font-family: var(--ui-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ui-gold-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px #000;
+}
+
+/* Shorter than the hero's own bars: this is a glance, not a readout. */
+.ally .bar {
+  height: 0.72rem;
+}
+
+.ally .bar span {
+  font-size: max(9px, 0.55rem);
+}
+
+.ally-gold {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--ui-edge);
+  border-radius: 2px;
+  background: linear-gradient(180deg, #2a3040, #171c26);
+  color: var(--ui-gold-bright);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.ally-gold:hover {
+  background: linear-gradient(180deg, #3a4254, #212834);
+  color: #ffe9a8;
+}
+
+/* A dead hero cannot be given anything, and a button that looks pressable and
+   only ever answers with a refusal toast is worse than one that is plainly off. */
+.ally.is-dead .ally-gold {
+  pointer-events: none;
+  opacity: 0.4;
+}
+
+/* ── The handover ──────────────────────────────────────────────────────────
+   The "Entregar" label and the ring only exist while an item is in flight.
+   `.is-dropping` is set on the panel at dragstart, so every card lights up at
+   once and the player can see where the thing can go. */
+.ally-drop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: max(9px, 0.56rem);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(10, 14, 20, 0.72);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.hud-allies.is-dropping .ally:not(.is-dead) {
+  border-color: var(--ui-gold-bright);
+  box-shadow: 0 0 0 1px rgba(200, 162, 83, 0.5), 0 0 18px rgba(200, 162, 83, 0.25);
+}
+
+.hud-allies.is-dropping .ally:not(.is-dead) .ally-drop {
+  opacity: 1;
+}
+
+.ally.is-over {
+  border-color: #ffe9a8;
+  box-shadow: 0 0 0 2px rgba(255, 233, 168, 0.75), 0 0 26px rgba(255, 233, 168, 0.4);
+}
+
+/* The slot being carried, so the player can see which one left the bag. */
+.inv-slot.is-draggable {
+  cursor: grab;
+}
+
+.inv-slot.is-dragging {
+  opacity: 0.3;
+}
+
+/* What the pointer carries. Fixed rather than absolute so it tracks the
+   viewport, and transparent to hit tests so `elementFromPoint` can see the
+   card underneath it. */
+.drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 2.6rem;
+  height: 2.6rem;
+  margin: -1.3rem 0 0 -1.3rem;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 60;
+  color: var(--ui-gold-bright);
+  background: rgba(14, 18, 24, 0.9);
+  border: 1px solid var(--ui-gold-bright);
+  border-radius: 2px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65);
+}
+
+/* ── The gold gift dialog ─────────────────────────────────────────────────
+   Centred and modal: it takes the keyboard, and a figure typed into a box
+   floating at the edge of a 3D scene is too easy to lose track of. */
+.hud-gift {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 8, 12, 0.55);
+  z-index: 40;
+}
+
+.hud-gift.is-hidden {
+  display: none;
+}
+
+.hud-gift-plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 1.2rem 1.6rem;
+  min-width: 17rem;
+}
+
+.hud-gift-title {
+  font-family: var(--ui-display);
+  font-size: 1.15rem;
+  letter-spacing: 0.08em;
+  color: var(--ui-gold-bright);
+  text-shadow: 0 2px 3px #000;
+}
+
+.hud-gift-to {
+  font-style: normal;
+  font-size: 0.85rem;
+  color: var(--ui-text);
+}
+
+.hud-gift-amount {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--ui-edge);
+  border-radius: 2px;
+  background: #0e1218;
+  color: var(--ui-gold-bright);
+  font-family: var(--ui-display);
+  font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.hud-gift-amount:focus {
+  outline: none;
+  border-color: var(--ui-gold-bright);
+  box-shadow: 0 0 12px rgba(200, 162, 83, 0.3);
+}
+
+.hud-gift-purse {
+  font-size: max(10px, 0.65rem);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-text-dim);
+}
+
+.hud-gift-row {
+  display: flex;
+  gap: 0.55rem;
+  margin-top: 0.2rem;
+}
+
+/* Core integrity, first in the top-left column. */
+.hud-core {
   padding: 0.5rem 0.9rem;
   display: flex;
   flex-direction: column;
@@ -1537,3 +1834,128 @@ body.is-usable:not(.is-targeting) canvas {
   color: var(--ui-text);
   font-weight: 600;
 }
+
+/* Painted icons.
+   The SVG set tinted itself with `currentColor`, so hover and disabled states
+   came free from `color` and `opacity`. A painted plate carries its own colour
+   and ignores `color`, so the states are rebuilt as filters, which apply to an
+   image exactly as they did to the inline SVG. */
+.glyph img.art,
+.inv-glyph img.art,
+.shop-icon img.art,
+.hero-ability .glyph img.art {
+  display: block;
+  /* Sized by the width/height attributes the call site already passes, NOT by
+     a percentage: these containers never had a width of their own, because an
+     inline SVG sized itself. With 100% the plates filled whatever box they
+     landed in and pushed the hero-select screen off the viewport. */
+  max-width: 100%;
+  object-fit: contain;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .command:hover:not(:disabled) img.art,
+  .shop-item.is-affordable:hover img.art {
+    filter: brightness(1.18);
+  }
+}
+
+/* Lifting the painted plates.
+   They are hand-painted at 256 px and land in the HUD at 20-28, dark art on a
+   dark panel, and at that size they read as smudges next to the gold SVG set
+   they replaced. Brightness and contrast recover the value range the downscale
+   flattens; the two dark drop-shadows draw a rim that separates the plate from
+   the panel behind it, which is the part that actually makes them legible. */
+.glyph img.art,
+.inv-glyph img.art,
+.shop-icon img.art,
+.hero-ability .glyph img.art {
+  filter: brightness(1.24) contrast(1.16) saturate(1.18)
+    drop-shadow(0 0 2px rgba(0, 0, 0, 0.95)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+}
+
+/* A ready ability gets a warm rim as well, so the bar reads at a glance. */
+.command:not(:disabled) .glyph img.art {
+  filter: brightness(1.3) contrast(1.18) saturate(1.22)
+    drop-shadow(0 0 2px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 5px rgba(200, 162, 83, 0.4));
+}
+
+/* Painted portraits sit over the procedural crest, which stays as the empty
+   state for any hero without one. */
+.portrait-art,
+.hero-card-portrait-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.hero-card-portrait-box { position: relative; display: block; }
+
+/* The card's slot is wide and short, so `cover` crops top and bottom. A bust
+   has to be anchored high or the crop takes the face and leaves the chest. */
+.hero-card-portrait-art { object-position: 50% 12%; }
+.hero-card-portrait-box .hero-card-portrait { display: block; width: 100%; }
+
+/* Player invocations, under the purse.
+   Square icon buttons rather than labelled pills: they live beside the purse
+   where horizontal room is scarce, and a power the player fires under pressure
+   is found by its picture, not read. The name is in the tooltip. */
+.hud-invocations {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+  justify-content: flex-end;
+  /* Full row, so it wraps below the purse rather than next to it. */
+  flex-basis: 100%;
+}
+
+.invocation {
+  position: relative;
+  width: 2.6rem;
+  height: 2.6rem;
+  padding: 0.18rem;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  color: var(--ui-gold);
+  background: rgba(10, 14, 20, 0.72);
+  border: 1px solid rgba(200, 162, 83, 0.38);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+}
+
+.invocation-art { line-height: 0; display: block; }
+
+/* The number rides on the plate, like the cost on an ability button. */
+.invocation-time {
+  position: absolute;
+  right: 0.14rem;
+  bottom: 0.02rem;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 3px rgba(0, 0, 0, 0.9);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .invocation:not(:disabled):hover {
+    border-color: var(--ui-gold-bright);
+    color: var(--ui-gold-bright);
+  }
+}
+
+.invocation:disabled { cursor: default; opacity: 0.45; }
+
+/* Running: the one state that must be legible across the screen, because it is
+   the only one with a deadline the player is playing against. */
+.invocation.is-active {
+  color: #9ff2b4;
+  border-color: rgba(159, 242, 180, 0.75);
+  box-shadow: 0 0 10px rgba(80, 220, 130, 0.25);
+  opacity: 1;
+}
+
+.invocation.is-cooling:not(.is-active) { color: var(--ui-text-dim); }

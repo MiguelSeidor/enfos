@@ -115,7 +115,13 @@ export class UnitViewModule implements GameModule {
     // batch is faster but it is also this project's own vertex-animation
     // bake, and that bake failed silently four times running on exactly this
     // kind of character. See the header of `render/authoredView.ts`.
-    const authoredSource = def.kind === 'creep' ? getAuthored(def.id) : null;
+    // Not gated on `kind` any more. It was written when only creeps had
+    // authored art, and the gate silently sent the first hero that got some --
+    // Bulwark -- down the procedural path instead: the portrait in the HUD
+    // changed and the figure on the field did not. Membership of
+    // AUTHORED_MANIFEST is the whole condition; anything not in it falls
+    // through to the batch or the procedural build exactly as before.
+    const authoredSource = getAuthored(def.id);
     if (authoredSource) {
       const view = new AuthoredView(authoredSource, record.scale, (unit.id % 13) / 13);
       view.group.position.set(unit.pos.x, this.terrain.heightAt(unit.pos.x, unit.pos.z), unit.pos.z);

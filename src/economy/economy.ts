@@ -37,6 +37,35 @@ import type { SabotageModule } from '@/gameplay/sabotage';
  */
 const SHOP_RANGE = 10;
 
+/**
+ * Shops a hero can use from anywhere on the map.
+ *
+ * Sabotage is bought with influence and spends it on the OTHER side's half of
+ * the field; there is nothing to collect and nothing to carry back, so making
+ * a player walk home to press it only punishes them for holding a lane. The
+ * hero shop stays physical: it hands over gear that then has to be carried.
+ */
+const REMOTE_SHOPS: ReadonlySet<ShopKind> = new Set<ShopKind>(['sabotage']);
+
+/**
+ * How close two heroes must stand to hand something over, in metres.
+ *
+ * Gold has no such limit and items do, on purpose. Coin is a message; a
+ * shield is an object, and an object changing hands across the map would make
+ * the courier errand this exists for pointless -- the whole scenario is one
+ * hero holding a lane while the other fetches, and the fetching is the cost.
+ */
+const HANDOVER_RANGE = 6;
+
+/** An item lying on the ground, waiting for someone to pick it up. */
+export interface Drop {
+  id: number;
+  itemId: string;
+  pos: { x: number; z: number };
+  /** Only this team can pick it up. */
+  team: number;
+}
+
 export type ShopKind = 'hero' | 'sabotage';
 
 export interface PurchaseResult {
@@ -100,14 +129,182 @@ export class EconomyModule implements GameModule {
     });
   }
 
-  /** Which shop the hero can currently use, or null. */
+  /**
+   * Which shop the hero can currently use, or null.
+   *
+   * Physical shops first: standing at a building opens that one even though
+   * sabotage is reachable from anywhere, or a player at the sabotage counter
+   * could never open the counter they are standing at.
+   */
   shopInRange(hero: HeroState | null): ShopKind | null {
     if (!hero || !hero.alive) return null;
     const shops = this.shops[hero.team === 1 ? 1 : 0]!;
     for (const kind of ['hero', 'sabotage'] as ShopKind[]) {
       if (dist2(hero.pos, shops[kind]) <= SHOP_RANGE * SHOP_RANGE) return kind;
     }
+    for (const kind of REMOTE_SHOPS) return kind;
     return null;
+  }
+
+  /** Whether this particular shop is usable from where the hero stands. */
+  canUse(hero: HeroState | null, kind: ShopKind): boolean {
+    if (!hero || !hero.alive) return false;
+    if (REMOTE_SHOPS.has(kind)) return true;
+    const shops = this.shops[hero.team === 1 ? 1 : 0]!;
+    return dist2(hero.pos, shops[kind]) <= SHOP_RANGE * SHOP_RANGE;
+  }
+
+  /**
+   * Items on the ground.
+   *
+   * A handover to a full inventory does not fail and does not vanish: it
+   * lands at the recipient's feet and either hero can take it later. That is
+   * the owner's rule, and it is also the only behaviour that cannot lose a
+   * player's purchase to a mistimed click.
+   */
+  readonly drops: Drop[] = [];
+  private nextDropId = 1;
+
+  /**
+   * Moves gold between two heroes of the same team.
+   *
+   * No range check: the point of sending gold is that the other hero is
+   * somewhere else, on their way to a shop.
+   */
+  giveGold(fromId: EntityId, toId: EntityId, amount: number): { ok: boolean; reason?: string } {
+    const from = this.ctx.match.heroes.get(fromId);
+    const to = this.ctx.match.heroes.get(toId);
+    if (!from || !to) return { ok: false, reason: 'Héroe desconocido' };
+    if (from.id === to.id) return { ok: false, reason: 'A ti mismo no' };
+    if (from.team !== to.team) return { ok: false, reason: 'No es de tu equipo' };
+    if (!to.alive) return { ok: false, reason: 'Está muerto' };
+    const give = Math.floor(amount);
+    if (!(give > 0)) return { ok: false, reason: 'Cantidad inválida' };
+    if (from.gold < give) return { ok: false, reason: 'Oro insuficiente' };
+    from.gold -= give;
+    to.gold += give;
+    this.ctx.bus.emit('ui:notify', {
+      text: `Has recibido ${give} de oro`, severity: 'info', heroId: to.id,
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Hands one item from `fromId` to `toId`, or drops it at their feet.
+   *
+   * Books never reach here -- they are consumed at the counter and never
+   * enter an inventory -- but the kind is checked anyway, because the rule the
+   * owner set is about what MAY be traded and a future consumable could be
+   * neither gear nor potion.
+   */
+  giveItem(fromId: EntityId, toId: EntityId, itemId: string): { ok: boolean; reason?: string } {
+    const from = this.ctx.match.heroes.get(fromId);
+    const to = this.ctx.match.heroes.get(toId);
+    if (!from || !to) return { ok: false, reason: 'Héroe desconocido' };
+    if (from.id === to.id) return { ok: false, reason: 'A ti mismo no' };
+    if (from.team !== to.team) return { ok: false, reason: 'No es de tu equipo' };
+    if (!to.alive) return { ok: false, reason: 'Está muerto' };
+
+    const at = from.items.indexOf(itemId);
+    if (at < 0) return { ok: false, reason: 'No lo llevas' };
+    const item = findItem(itemId);
+    if (!item || (item.kind !== 'gear' && item.kind !== 'potion')) {
+      return { ok: false, reason: 'Ese objeto no se puede pasar' };
+    }
+    if (dist2(from.pos, to.pos) > HANDOVER_RANGE * HANDOVER_RANGE) {
+      return { ok: false, reason: 'Está demasiado lejos' };
+    }
+
+    from.items.splice(at, 1);
+    if (this.canTake(to, itemId)) {
+      to.items.push(itemId);
+      this.ctx.bus.emit('ui:notify', {
+        text: `Has recibido ${item.name}`, severity: 'info', heroId: to.id,
+      });
+    } else {
+      this.drops.push({
+        id: this.nextDropId++,
+        itemId,
+        pos: { x: to.pos.x, z: to.pos.z },
+        team: to.team,
+      });
+      this.ctx.bus.emit('ui:notify', {
+        text: `${item.name} ha caído al suelo`, severity: 'warn', heroId: from.id,
+      });
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Whether this hero stands close enough to take a dropped item.
+   *
+   * Public so the HUD can light the marker by the same test `pickUp` applies:
+   * a marker that invites a click the economy then refuses is a lie, and the
+   * only way to be sure it never happens is for there to be one test.
+   */
+  inReach(hero: HeroState, drop: Drop): boolean {
+    return (
+      hero.team === drop.team && dist2(hero.pos, drop.pos) <= HANDOVER_RANGE * HANDOVER_RANGE
+    );
+  }
+
+  /** The display name of an item id, for markers and messages. */
+  nameOf(itemId: string): string {
+    return findItem(itemId)?.name ?? itemId;
+  }
+
+  /** Takes an item off the ground. */
+  pickUp(heroId: EntityId, dropId: number): { ok: boolean; reason?: string } {
+    const hero = this.ctx.match.heroes.get(heroId);
+    if (!hero || !hero.alive) return { ok: false, reason: 'Sin héroe' };
+    const at = this.drops.findIndex((d) => d.id === dropId);
+    if (at < 0) return { ok: false, reason: 'Ya no está ahí' };
+    const drop = this.drops[at]!;
+    if (drop.team !== hero.team) return { ok: false, reason: 'No es de tu equipo' };
+    if (dist2(hero.pos, drop.pos) > HANDOVER_RANGE * HANDOVER_RANGE) {
+      return { ok: false, reason: 'Acércate al objeto' };
+    }
+    if (!this.canTake(hero, drop.itemId)) return { ok: false, reason: 'Inventario lleno' };
+    this.drops.splice(at, 1);
+    hero.items.push(drop.itemId);
+    return { ok: true };
+  }
+
+  /**
+   * Whether one more of `itemId` fits, by the same rules a purchase uses: gear
+   * takes a slot, a potion only takes one when it starts a fresh stack.
+   */
+  private canTake(hero: HeroState, itemId: string): boolean {
+    const item = findItem(itemId);
+    if (!item) return false;
+    if (item.kind === 'gear') {
+      if (this.owned(hero, itemId) > 0) return false;
+      return this.slotsUsed(hero) < INVENTORY_SLOTS;
+    }
+    if (item.kind === 'potion') {
+      const stack = item.stackSize ?? 1;
+      if (this.owned(hero, itemId) % stack !== 0) return true;
+      return this.slotsUsed(hero) < INVENTORY_SLOTS;
+    }
+    return false;
+  }
+
+  /**
+   * Items on the ground are module state, so they have to be saved.
+   *
+   * Everything else this module owns lives on the heroes and travels with the
+   * match state. A drop does not, and a replay that lost one would diverge the
+   * moment somebody picked it up.
+   */
+  saveState(): unknown {
+    return { drops: this.drops, nextDropId: this.nextDropId };
+  }
+
+  loadState(state: unknown): void {
+    const s = state as { drops?: Drop[]; nextDropId?: number };
+    this.drops.length = 0;
+    if (s?.drops) this.drops.push(...s.drops);
+    this.nextDropId = s?.nextDropId ?? 1;
   }
 
   /** How many of `itemId` the hero already owns. */
@@ -193,7 +390,7 @@ export class EconomyModule implements GameModule {
     if (!item) return { ok: false, reason: 'Objeto desconocido' };
 
     const kind: ShopKind = item.currency === 'gold' ? 'hero' : 'sabotage';
-    if (this.shopInRange(hero) !== kind) {
+    if (!this.canUse(hero, kind)) {
       return { ok: false, reason: 'Acércate a la tienda' };
     }
 
