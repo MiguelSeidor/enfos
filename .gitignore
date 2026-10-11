@@ -6,3 +6,41 @@ qa/shots/
 !qa/shots/.gitkeep
 .claude/*.lock
 .DS_Store
+
+# ── Raw asset sources ──────────────────────────────────────────────────────
+#
+# One folder per character, as it came out of Rodin, AccuRIG or CGTrader: the
+# FBX, the texture archives, the ActorCore motion zips. About 1.5 GB in all,
+# and `mutantbrain/Textures.rar` alone is 648 MB — GitHub refuses any file
+# over 100 MB, so these could not be pushed even if they belonged here.
+#
+# They do not belong here. What ships is the converted GLB in `public/models`,
+# and `tools/fbx-to-creep.mjs` is the recipe that produced it. Keeping the
+# sources out is also the rule from docs/HEROES_LECCIONES.md: a problem gets
+# fixed at conversion, never at load, so the converter and its options are the
+# artefact worth versioning.
+#
+# Keep your own copies. Re-running the converter needs them, and nothing in
+# the repo can replace them.
+/bulwark/
+/talon/
+/oracle/
+/vesper/
+/erika/
+/orc/
+/crusader/
+/mutantbrain/
+/infernaldog/
+/export/
+
+# Intermediate conversion output, kept beside the real part files but never
+# loaded: the whole prop before it was split and decimated.
+public/models/parts/full-raw.glb
+
+# Generated images and one-off GLB exports dropped in the root while working.
+/*.glb
+/Gemini_Generated_Image_*
+/ChatGPT Image*
+/image-*.png
+/*_Generated_Image_*
+bash.exe.stackdump
