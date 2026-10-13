@@ -23,7 +23,13 @@ import {
 } from '@/core/services';
 import { dist2 } from '@/core/mathx';
 import { landmark } from '@/world/layout';
-import { findItem, INVENTORY_SLOTS, validateShops, type ShopItem } from './items';
+import {
+  findItem,
+  INVENTORY_SLOTS,
+  validateShops,
+  type ShopItem,
+  type ShopKind,
+} from './items';
 import type { SabotageModule } from '@/gameplay/sabotage';
 
 /**
@@ -66,7 +72,9 @@ export interface Drop {
   team: number;
 }
 
-export type ShopKind = 'hero' | 'sabotage';
+// Declared with the stock it describes; re-exported here because this is
+// where the rest of the game has always imported it from.
+export type { ShopKind };
 
 export interface PurchaseResult {
   ok: boolean;
@@ -389,7 +397,9 @@ export class EconomyModule implements GameModule {
     const item = findItem(itemId);
     if (!item) return { ok: false, reason: 'Objeto desconocido' };
 
-    const kind: ShopKind = item.currency === 'gold' ? 'hero' : 'sabotage';
+    // The currency says which shop an entry belongs to, unless the entry says
+    // otherwise: the money changer takes gold and stands in the sabotage shop.
+    const kind: ShopKind = item.shop ?? (item.currency === 'gold' ? 'hero' : 'sabotage');
     if (!this.canUse(hero, kind)) {
       return { ok: false, reason: 'Acércate a la tienda' };
     }
@@ -426,8 +436,11 @@ export class EconomyModule implements GameModule {
     if (item.currency === 'gold') hero.gold -= item.cost;
     else hero.influence -= item.cost;
 
-    // Books and sabotage actions resolve immediately and are never stored.
+    // Books, sabotage actions and exchanges resolve immediately and are never
+    // stored. Paid for above, so an exchange can never pay out for free.
     if (item.kind === 'gear' || item.kind === 'potion') hero.items.push(itemId);
+    if (item.grants?.gold) hero.gold += item.grants.gold;
+    if (item.grants?.influence) hero.influence += item.grants.influence;
     this.applyItem(hero, item);
     if (item.experience) {
       this.ctx.bus.emit('hero:xp', { id: heroId, amount: item.experience, total: hero.xp });

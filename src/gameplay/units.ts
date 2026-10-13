@@ -71,6 +71,37 @@ export interface UnitRuntime {
    * `traits.invisible`; at or below zero the unit is unseen.
    */
   revealFor?: number;
+  /**
+   * A conjured creep's deadline, in simulation ticks.
+   *
+   * A deadline rather than a countdown, for the reason the frozen and
+   * true-sight maps give: it needs no upkeep, survives a save and restore
+   * unchanged, and cannot drift.
+   */
+  expiresAtTick?: number;
+  /** When it was conjured. With `expiresAtTick`, this makes a fraction. */
+  summonedAtTick?: number;
+  /**
+   * Conjured on its summoner's own ground, so it fights the wave instead of
+   * joining it. The faction carries the actual allegiance; this says the unit
+   * is a summon and holds the ground it was put on rather than marching.
+   */
+  allied?: boolean;
+  /** Where a player has sent this summon, if anywhere. Cleared on arrival. */
+  orderPos?: { x: number; z: number };
+  /**
+   * Told to stand still: it fights whatever comes into reach and chases
+   * nothing. Dropped by any order that asks it to go somewhere.
+   */
+  holding?: boolean;
+  /**
+   * Told to walk somewhere and not to pick fights on the way.
+   *
+   * Set by a plain move, cleared by attack-move and by an attack order. With
+   * no order at all a conjured ally is NOT passive: one summoned to hold a
+   * gate has to fight whatever reaches it, which is what it was bought for.
+   */
+  passive?: boolean;
   /** Simulation tick at which a stun ends, or 0 when not stunned. */
   stunnedUntilTick?: number;
   /**
@@ -99,6 +130,20 @@ export function isConcealed(id: EntityId, observerTeam?: number, tick = 0): bool
   // Concealment is a fact about the unit; seeing through it is a fact about who
   // is looking, so the observer has to be part of the question.
   return !hasTrueSight(observerTeam, tick);
+}
+
+/**
+ * How much of a conjured creep's minute is left, from 1 down to 0.
+ *
+ * Null for everything that was not conjured, which is almost everything: the
+ * HUD asks once per selected unit and the common answer is "not one of those".
+ */
+export function summonLifeLeft(id: EntityId, tick: number): number | null {
+  const runtime = runtimes.get(id);
+  if (runtime?.expiresAtTick === undefined || runtime.summonedAtTick === undefined) return null;
+  const span = runtime.expiresAtTick - runtime.summonedAtTick;
+  if (span <= 0) return 0;
+  return Math.max(0, Math.min(1, (runtime.expiresAtTick - tick) / span));
 }
 
 /**

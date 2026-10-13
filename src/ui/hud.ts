@@ -689,6 +689,13 @@ export class Hud {
     portrait.appendChild(this.portraitArt);
     const levelEl = el('div', 'level', '1');
     portrait.appendChild(levelEl);
+    // Clicking the portrait drops whatever else the player was commanding and
+    // puts the camera back on the hero. With a pack of conjured creeps under
+    // orders there was no way back except clicking the hero's own body, and
+    // missing it quietly left the next right-click with the creeps.
+    portrait.classList.add('is-focusable');
+    setTip(portrait, { head: 'Tu héroe', body: 'Clic para volver a él · F' });
+    portrait.addEventListener('click', () => callbacks.command('hero.focus'));
     heroBox.appendChild(portrait);
 
     const vitals = el('div', 'vitals');
@@ -1367,6 +1374,8 @@ export interface HudOptions {
   selectedUnitId?: () => EntityId | null;
   /** Unit under the cursor, outlined so hovering reads without a cursor swap. */
   hoveredUnitId?: () => EntityId | null;
+  /** Conjured allies the player has picked out, for their ground rings. */
+  pickedSummons?: () => EntityId[];
   /** An inventory slot was clicked; the id is the item to consume. */
   useItem: (itemId: string) => void;
   /** A command-card button was clicked; the id is the slot's own id. */
@@ -1479,7 +1488,7 @@ export class HudModule implements GameModule {
     this.hint.className = 'hud-hint ui-panel';
     this.hint.innerHTML =
       '<b>Clic derecho</b> mover o atacar · <b>Q W E R</b> habilidades · ' +
-      '<b>S</b> tienda de sabotaje · ' +
+      '<b>S</b> tienda de sabotaje · <b>H</b> mantener posición · ' +
       '<b>Flechas</b> / bordes desplazar · <b>Rueda</b> zoom · ' +
       '<b>Espacio</b> pausa · <b>A</b> atacar en movimiento · <b>F</b> centrar en héroe';
     this.hud.root.appendChild(this.hint);
@@ -1562,6 +1571,8 @@ export class HudModule implements GameModule {
       this.opts.playerHeroId(),
       this.opts.selectedUnitId?.() ?? null,
       this.opts.hoveredUnitId?.() ?? null,
+      this.opts.localTeam(),
+      this.opts.pickedSummons?.() ?? [],
     );
     this.minimap.refresh(this.match, this.lanes);
   }

@@ -22,6 +22,7 @@ import type { MatchModule } from './match';
 import { heroOrders, issueOrder } from './movement';
 import type { AttributeId, ProgressionModule } from './progression';
 import { isInvocationId, type InvocationId, type InvocationModule } from './invocations';
+import type { SabotageModule } from './sabotage';
 
 export type Command =
   | { kind: 'move'; pos: Vec2 }
@@ -37,6 +38,29 @@ export type Command =
   | { kind: 'giveGold'; toId: EntityId; amount: number }
   | { kind: 'giveItem'; toId: EntityId; itemId: string }
   | { kind: 'pickUp'; dropId: number }
+  // Conjure a pack where the player pointed. The position travels with the
+  // command, because it is the player's decision and every machine has to
+  // resolve it identically.
+  | { kind: 'summon'; pos: Vec2 }
+  /**
+   * Orders conjured creeps to a spot.
+   *
+   * A list, not one id: the player drags a box over five of them and sends
+   * them together, and five separate commands would arrive on five different
+   * ticks and scatter the pack.
+   */
+  | {
+      kind: 'herd';
+      ids: EntityId[];
+      /**
+       * `move` walks them to `pos` past anything in the way; `attackMove`
+       * walks the same path and stops to fight; `attack` sets `targetId`;
+       * `hold` roots them where they stand.
+       */
+      order: 'move' | 'attackMove' | 'attack' | 'hold';
+      pos?: Vec2;
+      targetId?: EntityId;
+    }
   | { kind: 'attribute'; attribute: AttributeId }
   /** A player power: `Parar el tiempo`, `Ver lo invisible`. */
   | { kind: 'invoke'; id: InvocationId }
@@ -109,6 +133,27 @@ export function sanitizeCommand(raw: unknown): Command | null {
         : null;
     case 'pickUp':
       return Number.isInteger(c.dropId) ? { kind: 'pickUp', dropId: c.dropId as number } : null;
+    case 'summon': {
+      const pos = vec(c.pos);
+      return pos ? { kind: 'summon', pos } : null;
+    }
+    case 'herd': {
+      if (!Array.isArray(c.ids)) return null;
+      const order =
+        c.order === 'attack' || c.order === 'hold' || c.order === 'attackMove'
+          ? c.order
+          : 'move';
+      const pos = vec(c.pos);
+      // A march with nowhere to go, or an attack with nothing to hit, is not
+      // an order. Hold needs neither.
+      if ((order === 'move' || order === 'attackMove') && !pos) return null;
+      if (order === 'attack' && !Number.isInteger(c.targetId)) return null;
+      // Capped: the list arrives over the wire and a selection cannot be
+      // larger than what a player can own.
+      const ids = c.ids.filter((v) => Number.isInteger(v)).slice(0, 64) as EntityId[];
+      if (!ids.length) return null;
+      return { kind: 'herd', ids, order, pos: pos ?? undefined, targetId: c.targetId as EntityId };
+    }
     case 'invoke':
       return isInvocationId(c.id) ? { kind: 'invoke', id: c.id } : null;
     case 'attribute':
@@ -134,6 +179,13 @@ export class CommandModule implements GameModule {
     private readonly progression: ProgressionModule,
     private readonly invocations: InvocationModule,
   ) {}
+
+  /**
+   * Set by `createGameplay` after construction, the way `economy.sabotage` is:
+   * the sabotage module is built after this one, and taking it in the
+   * constructor would mean reordering the whole bundle for one field.
+   */
+  sabotage!: SabotageModule;
 
   init(ctx: GameContext): void {
     this.ctx = ctx;
@@ -206,6 +258,12 @@ export class CommandModule implements GameModule {
         return;
       case 'pickUp':
         this.report(hero.id, this.economy.pickUp(hero.id, cmd.dropId));
+        return;
+      case 'summon':
+        this.report(hero.id, this.sabotage.summon(hero.id, cmd.pos));
+        return;
+      case 'herd':
+        this.sabotage.herd(hero.id, cmd.ids, cmd.order, cmd.pos, cmd.targetId);
         return;
       case 'invoke':
         this.report(hero.id, this.invocations.invoke(hero.id, cmd.id));

@@ -33,6 +33,11 @@ export type IconId =
   | 'fist'
   | 'heart'
   | 'eye'
+  // The money changer in T2. Two silhouettes rather than one shared glyph:
+  // the pair sits side by side on the card, and a row that differs from its
+  // neighbour only in its label is read as a duplicate.
+  | 'to-influence'
+  | 'to-gold'
   // Command-card orders.
   | 'plus'
   | 'stop'
@@ -64,6 +69,18 @@ const PATHS: Record<IconId, string> = {
   'arrow-rain': 'M5 2h2v12.2l2.3-2.3 1.4 1.4L6 18 1.3 13.3l1.4-1.4L5 14.2V2Zm6 4h2v8.2l2.3-2.3 1.4 1.4L12 18l-4.7-4.7 1.4-1.4L11 14.2V6Zm6-4h2v12.2l2.3-2.3 1.4 1.4L18 18l-4.7-4.7 1.4-1.4L17 14.2V2Z',
   // A boot trailing speed lines: the sidestep.
   'wind-step': 'M9 2h3l.6 6.4 5.1 3.1c1.2.7 1.9 2 1.9 3.4V19H8.5c-1.9 0-3.5-1.6-3.5-3.5V12h3l-2-4h3L9 2Zm-7 5h4v2H2V7Zm-1 4h4v2H1v-2Zm1 4h4v2H2v-2Z',
+  // Coins feeding an arrow that turns up into a spark: gold becomes influence.
+  'to-influence':
+    'M4 5.5c0-1.4 2.2-2.5 5-2.5s5 1.1 5 2.5S11.8 8 9 8 4 6.9 4 5.5Zm0 3.1C5.1 9.5 6.9 10 9 10' +
+    's3.9-.5 5-1.4v2C14 12 11.8 13 9 13s-5-1-5-2.4v-2Zm0 4.5C5.1 14 6.9 14.5 9 14.5s3.9-.5 5-1.4v2' +
+    'c0 1.4-2.2 2.4-5 2.4s-5-1-5-2.4v-2ZM17 3l1.3 3.2L21.5 7.5 18.3 8.8 17 12l-1.3-3.2L12.5 7.5' +
+    'l3.2-1.3L17 3Zm0 10.5 1 2.4 2.5 1-2.5 1-1 2.6-1-2.6-2.5-1 2.5-1 1-2.4Z',
+  // The spark spending itself back into a stack of coins: influence becomes gold.
+  'to-gold':
+    'M7 2 8.3 5.2 11.5 6.5 8.3 7.8 7 11 5.7 7.8 2.5 6.5l3.2-1.3L7 2Zm8 4.5c2.8 0 5 1.1 5 2.5' +
+    'S17.8 11.5 15 11.5 10 10.4 10 9s2.2-2.5 5-2.5Zm-5 5.6c1.1.9 2.9 1.4 5 1.4s3.9-.5 5-1.4v2' +
+    'c0 1.4-2.2 2.4-5 2.4s-5-1-5-2.4v-2Zm0 4.5c1.1.9 2.9 1.4 5 1.4s3.9-.5 5-1.4v2' +
+    'c0 1.4-2.2 2.4-5 2.4s-5-1-5-2.4v-2Z',
   // Interface crest used as the hero portrait backdrop.
   crest:
     'M12 2 3 6v7c0 5 3.8 8.7 9 9.9 5.2-1.2 9-4.9 9-9.9V6l-9-4Zm0 2.4 6.8 3v5.6c0 3.7-2.7 6.6-6.8 7.7-4.1-1.1-6.8-4-6.8-7.7V7.4L12 4.4Z',

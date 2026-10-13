@@ -48,6 +48,8 @@ export class AuthoredView {
   private readonly worldScale: number;
   /** Metres per second each locomotion clip was authored for. */
   private readonly paceOf = new Map<ClipId, number>();
+  /** Whether this one is currently hidden. See `setConcealed`. */
+  private concealed = false;
   private readonly rootRest = new THREE.Vector3();
   /**
    * Bones turned a fixed amount after every clip tick.
@@ -332,6 +334,33 @@ export class AuthoredView {
       this.rootBone.position.x = this.rootRest.x;
       this.rootBone.position.z = this.rootRest.z;
     }
+  }
+
+  /**
+   * Renders this one as a shimmer instead of a body.
+   *
+   * `traits.invisible` had no visual side at all: `isConcealed` was read by
+   * combat, to refuse the creep as a target, and by nothing else. While the
+   * Acechador had no art that was invisible enough by accident. With a model
+   * on it the creep would walk down the lane in plain sight, untargetable,
+   * and Ver lo invisible would change nothing on screen.
+   *
+   * Not drawn at all. This was a 22% fade first, reasoning from the design
+   * note on the creep — "noticing it is the whole difficulty" — that a thing
+   * nobody can see is a thing nobody can notice. Played, it was simply a
+   * translucent creep walking down the lane: visible, so not a stealth
+   * creature, and Ver lo invisible had nothing to reveal. The owner is the
+   * one who looked at it in a match, and invisible means invisible.
+   *
+   * `visible = false` on the group skips it in the render traversal, so a
+   * concealed creep costs a boolean per frame rather than a draw call. The
+   * animation mixer keeps running: the creep that reappears has to be
+   * mid-stride, not frozen where it vanished.
+   */
+  setConcealed(on: boolean): void {
+    if (on === this.concealed) return;
+    this.concealed = on;
+    this.group.visible = !on;
   }
 
   dispose(): void {

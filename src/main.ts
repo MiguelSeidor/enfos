@@ -57,9 +57,10 @@ import { preloadParts } from '@/units/build/parts';
 import { preloadAuthored } from '@/units/build/authoredCharacter';
 import { HeroSelect, type HeroCard, type CommandSlot } from '@/ui';
 import { LevelPanel } from '@/ui/levelPanel';
-import { T1_STOCK, SABOTAGE_ITEMS } from '@/economy/items';
+import { T1_STOCK, T2_STOCK, SUMMON_COST } from '@/economy/items';
 import type { ShopKind } from '@/economy/economy';
 import { landmark, type LandmarkKind } from '@/world/layout';
+import { runtimeOf } from '@/gameplay/units';
 import { TerrainKey, RenderKey, UiKey, CombatKey } from '@/core/services';
 import { UnitKind } from '@/core/contracts';
 import {
@@ -201,6 +202,7 @@ async function main(): Promise<void> {
     playerHeroId: () => gameplay?.match.playerHero?.id ?? null,
     localTeam: () => gameplay?.match.localTeam ?? 0,
     selectedUnitId: () => selectedUnit,
+    pickedSummons: () => [...selectedSummons],
     hoveredUnitId: () => hoveredUnit,
     minimap: {
       onSeek: (pos) => {
@@ -232,6 +234,24 @@ async function main(): Promise<void> {
       if (!h) return;
       const ui = engine.ctx.services.get(UiKey);
 
+      if (id === 'summon.hold') {
+        summonOrder('hold');
+        return;
+      }
+      if (id === 'summon.attack') {
+        setAttackMove(true);
+        return;
+      }
+      if (id === 'summon.release') {
+        selectedSummons.clear();
+        return;
+      }
+      if (id === 'hero.focus') {
+        selectedSummons.clear();
+        selectedUnit = null;
+        rtsCamera.follow(h.id);
+        return;
+      }
       if (id === 'shop.sabotage') {
         requestShopOpen('sabotage');
         return;
@@ -249,6 +269,14 @@ async function main(): Promise<void> {
         // Through the command path like everything else, so it is deterministic
         // and crosses the network: a power that fires locally would desync.
         sendCommand({ kind: 'invoke', id: id.slice(7) as InvocationId });
+        return;
+      }
+      // The conjuring is the one shop row that does not resolve on click: it
+      // needs a spot, so the button arms the cursor and the ground click after
+      // it carries the purchase.
+      if (id === 'buy.sab.summon') {
+        closeShop();
+        beginSummon();
         return;
       }
       if (id.startsWith('buy.')) {
@@ -319,7 +347,9 @@ async function main(): Promise<void> {
 
   // Registration order does not matter; Engine sorts by `order`.
   for (const module of createWorldModules()) engine.add(module);
-  for (const module of createUnitModules(showcase)) engine.add(module);
+  for (const module of createUnitModules(showcase, () => gameplay?.match.localTeam ?? 0)) {
+    engine.add(module);
+  }
   for (const module of createVfxModules()) engine.add(module);
   engine.add(renderModule);
   engine.add(hudModule);
@@ -408,7 +438,18 @@ async function main(): Promise<void> {
    *
    * Self-cast abilities never arm it — they fire on the press, as before.
    */
-  let aiming: { index: number; targeting: 'unit' | 'point' } | null = null;
+  /**
+   * The armed cursor.
+   *
+   * `index` is an ability slot; `kind: 'summon'` is the conjuring bought from
+   * the sabotage shop, which also wants a point on the ground and has no
+   * ability behind it. One cursor rather than two, because the player can only
+   * be pointing at one thing and Escape has to cancel whichever it is.
+   */
+  let aiming:
+    | { kind: 'ability'; index: number; targeting: 'unit' | 'point' }
+    | { kind: 'summon'; targeting: 'point' }
+    | null = null;
   const targetingOverlay = new TargetingOverlay(scene, (x, z) => terrain.heightAt(x, z));
   const cancelAim = (): void => {
     aiming = null;
@@ -438,7 +479,7 @@ async function main(): Promise<void> {
       return;
     }
     setAttackMove(false);
-    aiming = { index, targeting: def.targeting };
+    aiming = { kind: 'ability', index, targeting: def.targeting };
     document.body.classList.add('is-aiming');
     // The circle has to be the one the hero actually has, or an ability that
     // grew with level is aimed with the ring it had at level 1.
@@ -449,8 +490,33 @@ async function main(): Promise<void> {
     );
   };
   const commitAim = (target: AbilityTarget): void => {
-    if (aiming) sendCommand({ kind: 'cast', index: aiming.index, target });
+    if (aiming?.kind === 'summon') {
+      if (target.kind === 'point') sendCommand({ kind: 'summon', pos: target.pos });
+    } else if (aiming) {
+      sendCommand({ kind: 'cast', index: aiming.index, target });
+    }
     cancelAim();
+  };
+
+  /**
+   * Arms the cursor for a conjuring.
+   *
+   * The purchase is not made here: `summon` charges the influence when it
+   * lands, so a player who arms the cursor and presses Escape has paid
+   * nothing. The check below is only so the cursor is not armed for something
+   * that cannot happen.
+   */
+  const beginSummon = (): void => {
+    const h = gameplay?.match.playerHero;
+    if (!gameplay || !h || !h.alive) return;
+    if (h.influence < SUMMON_COST) {
+      engine.ctx.services.get(UiKey).notify('Influencia insuficiente', 'warn');
+      return;
+    }
+    setAttackMove(false);
+    aiming = { kind: 'summon', targeting: 'point' };
+    document.body.classList.add('is-aiming');
+    targetingOverlay.show(4, 0);
   };
 
   // Where the cursor meets the ground, found by marching the view ray over the
@@ -542,9 +608,38 @@ async function main(): Promise<void> {
     () => aiming !== null,
     cancelAim,
     () => requestShopOpen('sabotage'),
+    () => summonOrder('hold'),
   );
   let selectedUnit: number | null = null;
   let hoveredUnit: number | null = null;
+  /**
+   * Conjured allies the player has picked out, in selection order.
+   *
+   * A set of ids rather than the units themselves: a summon can die or expire
+   * between the drag that selected it and the order that moves it, and a stale
+   * object would be an order sent to a corpse.
+   */
+  const selectedSummons = new Set<number>();
+  /** Sends the picked pack an order. Shared by the command card and the keys. */
+  const summonOrder = (
+    order: 'move' | 'attackMove' | 'attack' | 'hold',
+    pos?: { x: number; z: number },
+    targetId?: number,
+  ): void => {
+    const ids = [...selectedSummons].filter((id) => engine.ctx.match.units.get(id)?.alive);
+    if (ids.length) sendCommand({ kind: 'herd', ids, order, pos, targetId });
+  };
+  /** Every conjured ally of the local team that is still standing. */
+  const ownSummons = (): number[] => {
+    if (!gameplay) return [];
+    const team = gameplay.match.localTeam;
+    const out: number[] = [];
+    for (const unit of engine.ctx.match.units.values()) {
+      if (!unit.alive || unit.team !== team) continue;
+      if (runtimeOf(unit.id)?.allied) out.push(unit.id);
+    }
+    return out;
+  };
   /** Set once the shop module is registered; clicking a shop calls it. */
   let requestShopOpen: (kind: ShopKind) => void = () => {};
   const worldPointer = setupOrders(
@@ -587,6 +682,15 @@ async function main(): Promise<void> {
     () => attackMove,
     () => setAttackMove(false),
     (x, y) => hudModule.dropAt(x, y),
+    {
+      own: ownSummons,
+      selected: () => [...selectedSummons],
+      select: (ids) => {
+        selectedSummons.clear();
+        for (const id of ids) selectedSummons.add(id);
+      },
+      order: summonOrder,
+    },
     sendCommand,
     {
       active: () => aiming?.targeting ?? null,
@@ -745,12 +849,46 @@ async function main(): Promise<void> {
         hudModel.abilities[i]!.cooldownLeft = gameplay.abilities.cooldownLeft(h.id, defs[i]!.id);
       }
 
-      // ── Command card: the shop's stock when one is open, the hero's orders
-      //    otherwise. Rebuilt into the same array each tick; the HUD diffs by
-      //    slot id and only touches the DOM when the set actually changes.
+      // ── Command card: a shop's stock when one is open, the conjured pack's
+      //    orders when one is picked out, the hero's orders otherwise. Rebuilt
+      //    into the same array each tick; the HUD diffs by slot id and only
+      //    touches the DOM when the set actually changes.
       const slots: CommandSlot[] = [];
-      if (openShopKind !== null) {
-        const stock = openShopKind === 'hero' ? T1_STOCK : SABOTAGE_ITEMS;
+      // Drop the dead before counting: a pack whose last member expired must
+      // give the card back to the hero rather than hold an empty selection.
+      for (const id of [...selectedSummons]) {
+        if (!engine.ctx.match.units.get(id)?.alive) selectedSummons.delete(id);
+      }
+      if (openShopKind === null && selectedSummons.size > 0) {
+        hudModel.command.title = `Convocados · ${selectedSummons.size}`;
+        slots.push({
+          id: 'summon.hold',
+          kind: 'order',
+          label: 'Mantener posición',
+          icon: 'shield',
+          hotkey: 'H',
+          tooltip:
+            'Se quedan donde están y pelean con lo que se les acerque, sin perseguir a nadie.',
+        });
+        slots.push({
+          id: 'summon.attack',
+          kind: 'order',
+          label: 'Atacar en movimiento',
+          icon: 'sword',
+          hotkey: 'A',
+          tooltip:
+            'Marchan hasta donde señales peleando con lo que encuentren. ' +
+            'Clic derecho sobre un enemigo los manda a por él; sobre el suelo, caminan sin buscar pelea.',
+        });
+        slots.push({
+          id: 'summon.release',
+          kind: 'order',
+          label: 'Soltar',
+          icon: 'close',
+          tooltip: 'Deja de mandarlos y devuelve el clic derecho al héroe.',
+        });
+      } else if (openShopKind !== null) {
+        const stock = openShopKind === 'hero' ? T1_STOCK : T2_STOCK;
         hudModel.command.title =
           openShopKind === 'hero' ? 'T1 · Pertrechos' : 'T2 · Sabotaje';
         // First slot, not last: the card scrolls, and a close button that
@@ -768,9 +906,6 @@ async function main(): Promise<void> {
           // Gear is unique, so an owned piece reads as owned rather than as
           // merely unaffordable — those are different reasons to grey out.
           const owned = item.kind === 'gear' && held > 0;
-          // A sabotage needs someone to sabotage: solo, the shop explains
-          // that instead of taking the influence for nothing.
-          const noRival = item.kind === 'action' && gameplay.match.rivalsOf(gameplay.match.localTeam).length === 0;
           const counterplay = 'counterplay' in item ? ` Contramedida: ${String(item.counterplay)}` : '';
           slots.push({
             id: `buy.${item.id}`,
@@ -781,12 +916,15 @@ async function main(): Promise<void> {
             tooltip: item.description + counterplay,
             cost: item.cost,
             currency: item.currency,
-            disabled: owned || noRival || purse < item.cost,
+            // Never greyed out for want of a rival. A sabotage with nobody to
+            // aim at refuses itself in `SabotageModule.launch`, before the
+            // purchase is charged, and says so in its own words — which is
+            // better than a dead button, because the player who presses it
+            // learns what the thing needs.
+            disabled: owned || purse < item.cost,
             reason: owned
               ? 'Ya lo llevas'
-              : noRival
-                ? 'Solo en partidas contra un rival'
-                : `Te faltan ${Math.ceil(item.cost - purse)} de ${item.currency === 'influence' ? 'influencia' : 'oro'}`,
+              : `Te faltan ${Math.ceil(item.cost - purse)} de ${item.currency === 'influence' ? 'influencia' : 'oro'}`,
             highlight: owned,
           });
         }
@@ -811,7 +949,9 @@ async function main(): Promise<void> {
             aim: aimLabel(a),
             // Lit while its cursor is armed or the hero is walking in to cast
             // it, so the player can see which spell the next click belongs to.
-            highlight: aiming?.index === i || gameplay.abilities.pendingCast(h.id) === i,
+            highlight:
+              (aiming?.kind === 'ability' && aiming.index === i) ||
+              gameplay.abilities.pendingCast(h.id) === i,
             // Not enough mana is a different refusal from being on cooldown,
             // and the button has to say which.
             disabled: h.mana < a.manaCost,
@@ -1239,6 +1379,15 @@ async function main(): Promise<void> {
     get lastCommand() {
       return lastCommand;
     },
+    /**
+     * Conjured allies, and which of them the player has picked out. Exposed
+     * for the same reason `issueOrder` is: without it a test of the rubber
+     * band can only watch for creeps that move, which cannot tell an empty
+     * selection from an order that was never obeyed.
+     */
+    get summons() {
+      return { own: ownSummons(), selected: [...selectedSummons] };
+    },
     get net() {
       return net;
     },
@@ -1415,6 +1564,17 @@ function setupOrders(
   disarmAttackMove: () => void,
   /** The dropped item under a screen point, or null. */
   dropAt: (x: number, y: number) => number | null,
+  /** Picking conjured allies out of the field and sending them somewhere. */
+  summons: {
+    own: () => number[];
+    selected: () => number[];
+    select: (ids: number[]) => void;
+    order: (
+      order: 'move' | 'attackMove' | 'attack' | 'hold',
+      pos?: { x: number; z: number },
+      targetId?: number,
+    ) => void;
+  },
   /** Sends a player command into the match. */
   send: (cmd: Command) => void,
   /** An aimed ability waiting for its target. */
@@ -1445,6 +1605,59 @@ function setupOrders(
    * radius is derived by projecting the top of its head, so the region tracks
    * the on-screen silhouette at every zoom.
    */
+  /**
+   * Rubber-band selection over conjured allies.
+   *
+   * Only over those: the hero is driven by right-click and has never been part
+   * of a selection, and a box that swept it up would change how the whole game
+   * is played. Hostile creeps are nobody's to command.
+   *
+   * The band is a plain fixed-position div rather than something drawn on the
+   * world canvas, because it lives in screen space and never has to agree with
+   * anything in the scene.
+   */
+  const band = document.createElement('div');
+  band.className = 'drag-select is-hidden';
+  document.body.appendChild(band);
+  let dragFrom: { x: number; y: number } | null = null;
+  let dragging = false;
+
+  const drawBand = (x: number, y: number): void => {
+    if (!dragFrom) return;
+    const left = Math.min(dragFrom.x, x);
+    const top = Math.min(dragFrom.y, y);
+    band.style.transform = `translate(${left}px, ${top}px)`;
+    band.style.width = `${Math.abs(x - dragFrom.x)}px`;
+    band.style.height = `${Math.abs(y - dragFrom.y)}px`;
+  };
+
+  /**
+   * Conjured allies whose bodies project inside the band.
+   *
+   * The corner comes in as an argument rather than off `dragFrom`, which the
+   * release handler has already cleared by the time it asks. Reading the field
+   * there made this return an empty list every time: the band drew, the band
+   * hid, and nothing was ever selected.
+   */
+  const inBand = (from: { x: number; y: number }, x: number, y: number): number[] => {
+    const render = engine.ctx.services.get(RenderKey);
+    const terrain = engine.ctx.services.get(TerrainKey);
+    const lo = { x: Math.min(from.x, x), y: Math.min(from.y, y) };
+    const hi = { x: Math.max(from.x, x), y: Math.max(from.y, y) };
+    const out: number[] = [];
+    for (const id of summons.own()) {
+      const unit = engine.ctx.match.units.get(id);
+      if (!unit) continue;
+      const ground = terrain.heightAt(unit.pos.x, unit.pos.z);
+      // Mid-body, the same anchor `pickUnit` grabs by.
+      if (!render.project(unit.pos, ground + unit.radius * 2.6 * 0.55, projected)) continue;
+      if (projected.x < lo.x || projected.x > hi.x) continue;
+      if (projected.y < lo.y || projected.y > hi.y) continue;
+      out.push(id);
+    }
+    return out;
+  };
+
   const pickUnit = (screenX: number, screenY: number): number | null => {
     const render = engine.ctx.services.get(RenderKey);
     const terrain = engine.ctx.services.get(TerrainKey);
@@ -1503,6 +1716,28 @@ function setupOrders(
   };
 
   window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // The band is armed on every world left-press and only becomes a drag once
+  // the pointer has actually travelled. Below that threshold the press stays
+  // the click it always was, handled in the listener below.
+  window.addEventListener('pointermove', (e) => {
+    if (!dragFrom) return;
+    if (!dragging && Math.abs(e.clientX - dragFrom.x) + Math.abs(e.clientY - dragFrom.y) < 8) return;
+    dragging = true;
+    band.classList.remove('is-hidden');
+    drawBand(e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerup', (e) => {
+    if (!dragFrom) return;
+    const was = dragging;
+    const from = dragFrom;
+    dragFrom = null;
+    dragging = false;
+    band.classList.add('is-hidden');
+    if (!was) return;
+    summons.select(inBand(from, e.clientX, e.clientY));
+  });
+
   window.addEventListener('pointerdown', (e) => {
     // Mouse only. A finger has no buttons to distinguish a select from an
     // order, so touch is recognised as gestures first and arrives through the
@@ -1540,11 +1775,32 @@ function setupOrders(
     }
 
     if (e.button === 0) {
+      // Arm the rubber band. It becomes a selection only if the pointer moves;
+      // a plain click falls through to everything below unchanged.
+      dragFrom = { x: e.clientX, y: e.clientY };
+
       // Attack-move consumes this click entirely: on a unit it is an attack, on
       // open ground it is a march that engages whatever it meets. It is checked
       // before selection and before buildings, because an armed attack-move
       // means the player has already said what this click is for.
       if (attackMoveArmed()) {
+        // Whoever has the focus owns the order. With a conjured pack picked
+        // out, `A` is THEIR attack-move and the hero does nothing at all —
+        // pressing it used to march the hero instead, which is the one thing
+        // a player holding a pack of creeps does not want.
+        if (summons.selected().length) {
+          if (targetId !== null && !summons.own().includes(targetId)) {
+            summons.order('attack', undefined, targetId);
+          } else {
+            const ground = pickGround(e.clientX, e.clientY);
+            if (ground) {
+              summons.order('attackMove', ground);
+              onMoveOrder(ground);
+            }
+          }
+          disarmAttackMove();
+          return;
+        }
         if (targetId !== null) {
           setSelected(targetId);
           send({ kind: 'attack', targetId });
@@ -1559,6 +1815,16 @@ function setupOrders(
         disarmAttackMove();
         return;
       }
+
+      // A click on one conjured ally picks out that one; on open ground it
+      // drops the selection. Both before the usual selection work, because a
+      // player who is herding is not choosing an attack target.
+      const onSummon = targetId !== null && summons.own().includes(targetId);
+      if (onSummon) {
+        summons.select([targetId!]);
+        return;
+      }
+      if (summons.selected().length && targetId === null) summons.select([]);
 
       // An item on the ground is picked up by clicking it. Before selection,
       // because the marker is small and whatever is behind it is not what the
@@ -1592,6 +1858,24 @@ function setupOrders(
     }
 
     if (e.button !== 2) return;
+    // A selection owns the right click. This is the standard RTS reading and
+    // the one the player described: pick five, send them, pick the other five,
+    // send those. The hero gets its orders back the moment the selection is
+    // dropped with a click on open ground.
+    if (summons.selected().length) {
+      // On a body it is an attack order, on open ground a march — the same
+      // reading the hero's own right click has, so one habit serves both.
+      if (targetId !== null && !summons.own().includes(targetId)) {
+        summons.order('attack', undefined, targetId);
+        return;
+      }
+      const spot = pickGround(e.clientX, e.clientY);
+      if (spot) {
+        summons.order('move', spot);
+        onMoveOrder(spot);
+      }
+      return;
+    }
     if (targetId !== null) {
       setSelected(targetId);
       send({ kind: 'attack', targetId });
@@ -1923,6 +2207,8 @@ function setupInput(
   cancelAim: () => void,
   /** Opens the sabotage shop, which needs no building to stand at. */
   openSabotage: () => void,
+  /** Roots the conjured pack where it stands. Does nothing with none picked. */
+  holdSummons: () => void,
 ): void {
   const keys = new Set<string>();
   /**
@@ -1953,6 +2239,13 @@ function setupInput(
     // escape hatch after panning somewhere else.
     if (code === 'KeyF') {
       focusHero();
+      e.preventDefault();
+      return;
+    }
+    // Hold position, for a conjured pack. H is the RTS convention and it is
+    // free here; with nothing picked out it simply does nothing.
+    if (code === 'KeyH') {
+      holdSummons();
       e.preventDefault();
       return;
     }

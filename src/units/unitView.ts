@@ -31,7 +31,7 @@ import { bakeVat } from './anim/vat';
 import { bakeImportedVat } from './anim/vatImported';
 import { getAuthored } from './build/authoredCharacter';
 import { CLIP_IDS, type ClipId } from './anim/clips';
-import { runtimeOf } from '@/gameplay/units';
+import { isConcealed, runtimeOf } from '@/gameplay/units';
 
 const SIM_STEP = 1 / 30;
 /** Clips that locomotion drives, and that must yield to an unfinished action. */
@@ -60,6 +60,16 @@ interface ViewRecord {
 }
 
 export class UnitViewModule implements GameModule {
+  /**
+   * Which team is watching.
+   *
+   * Concealment is a fact about the creep; seeing through it is a fact about
+   * who is looking, so the renderer has to know whose side the screen is on.
+   * A callback rather than a value because the modules are built before a
+   * match exists.
+   */
+  constructor(private readonly localTeam: () => number = () => 0) {}
+
   readonly id = 'unitView';
   readonly order = 800;
 
@@ -338,6 +348,10 @@ export class UnitViewModule implements GameModule {
         record.view.group.rotation.y = facing;
         record.view.setSpeed(speed);
         record.view.update(dt);
+        // Only a creep with `traits.invisible` is ever concealed, and the call
+        // leaves on its first undefined check for everybody else.
+        const view = record.view as { setConcealed?: (on: boolean) => void };
+        view.setConcealed?.(isConcealed(unit.id, this.localTeam(), this.ctx.clock.tick));
       } else if (record.batch && record.slot !== undefined) {
         record.batch.setTransform(record.slot, x, y, z, facing, record.scale);
         batchesDirty = true;

@@ -203,7 +203,11 @@ export class MovementModule implements GameModule {
 
       this.tickTraits(unit, runtime, step);
 
-      if (unit.id % AI_BUCKETS === this.bucket) this.acquireTarget(unit, runtime.behavior);
+      // A conjured ally told to walk somewhere looks for nobody on the way.
+      // Everything else, including one with no orders at all, hunts normally.
+      if (unit.id % AI_BUCKETS === this.bucket && !runtime.passive) {
+        this.acquireTarget(unit, runtime.behavior);
+      }
       this.stepEnemy(unit, runtime.behavior, step);
     }
   }
@@ -282,6 +286,23 @@ export class MovementModule implements GameModule {
       // Skirmishers hold near max range; melee close all the way in.
       holdAt = behavior === 'skirmisher' ? reach * 0.85 : reach * 0.6;
       goal = target.pos;
+    } else if (runtime.allied && runtime.holding) {
+      // Rooted: it still swings at whatever walks into reach, because combat
+      // acquires and resolves on its own, but it takes not one step to find a
+      // fight. That is the whole point of telling a pack to hold a gate.
+      this.decelerate(unit, step);
+      if (target && target.alive) this.face(unit, target.pos, step);
+      return;
+    } else if (runtime.allied) {
+      // A conjured ally has no lane of its own: the lane runs one way, toward
+      // the Core it was summoned to defend, and a bodyguard that walks it
+      // would march away from the thing it is guarding. It stands where it was
+      // put, or where the player has since sent it, and fights what comes.
+      goal = runtime.orderPos ?? null;
+      if (goal && dist(unit.pos, goal) < 1.2) {
+        runtime.orderPos = undefined;
+        goal = null;
+      }
     } else {
       goal = this.nextWaypoint(unit, runtime);
     }

@@ -52,6 +52,7 @@ export function createGameplay(setup: MatchSetup): GameplayBundle {
   const sabotage = new SabotageModule(match, units, combat);
   sabotage.laneCount = LANE_COUNT;
   economy.sabotage = sabotage;
+  commands.sabotage = sabotage;
 
   return {
     // Economy (600) and progression (610) init after match (550), so the hero

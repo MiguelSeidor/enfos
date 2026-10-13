@@ -25,8 +25,20 @@ import type { IconId } from '@/ui/icons';
  * - `book` — consumed the instant it is bought: it grants its effect and never
  *   enters the inventory, so it costs no slot and has no ownership limit.
  * - `action` — a sabotage. Fires immediately, never stored, always repeatable.
+ * - `exchange` — one currency for the other. Resolves on purchase like a book,
+ *   so it costs no slot and has no ownership limit, and is bought over and
+ *   over by design.
  */
-export type ItemKind = 'gear' | 'potion' | 'book' | 'action';
+export type ItemKind = 'gear' | 'potion' | 'book' | 'action' | 'exchange';
+
+/**
+ * Which counter an entry is sold at.
+ *
+ * Declared here rather than in `economy.ts` because it is a property of the
+ * stock, and because an entry now needs to name its shop: the currency no
+ * longer implies it. The money changer stands in T2 and takes gold.
+ */
+export type ShopKind = 'hero' | 'sabotage';
 
 export interface ShopItem {
   id: string;
@@ -46,6 +58,16 @@ export interface ShopItem {
   restore?: { health?: number; mana?: number };
   /** Books only: experience granted on use. */
   experience?: number;
+  /**
+   * Which shop sells this.
+   *
+   * Left out by almost everything: gold is the hero shop and influence is
+   * sabotage, and `buy` falls back to that. Only an entry that breaks the
+   * rule — one priced in the other counter's currency — has to say so.
+   */
+  shop?: ShopKind;
+  /** Exchanges only: what the purchase pays out. */
+  grants?: { gold?: number; influence?: number };
 }
 
 /** Inventory slots per hero. Fixed by design. */
@@ -356,6 +378,55 @@ export const CONSUMABLE_ITEMS: ShopItem[] = [
 ];
 
 /**
+ * The money changer, in T2.
+ *
+ * One hundred for one hundred, both ways, which is what the owner asked for.
+ * It is worth being clear about what that does: the two currencies stop being
+ * two. The note at the top of this file says the split exists so that
+ * sabotaging does not compete with your own build for the same gold — at a
+ * 1:1 rate it does, in both directions, and the choice becomes a matter of
+ * taste rather than of cost. A rate below 1 on one side or both is the dial
+ * that brings the friction back; nothing else here would need to change.
+ *
+ * The round trip is lossless, so there is no arbitrage: a hundred gold out
+ * and back is a hundred gold, never a hundred and ten.
+ *
+ * These sit at the front of the T2 card on purpose. A player who opens the
+ * sabotage shop short of influence needs to find the remedy before the thing
+ * they cannot afford.
+ */
+export const EXCHANGE_ITEMS: ShopItem[] = [
+  {
+    id: 'exchange.influence',
+    name: 'Comprar influencia',
+    description: 'Cambia 100 de oro por 100 puntos de influencia. Se puede repetir.',
+    icon: 'to-influence',
+    cost: 100,
+    currency: 'gold',
+    // Priced in gold but sold at the sabotage counter, which is the whole
+    // reason `shop` exists.
+    shop: 'sabotage',
+    tier: 1,
+    modifiers: [],
+    kind: 'exchange',
+    grants: { influence: 100 },
+  },
+  {
+    id: 'exchange.gold',
+    name: 'Comprar oro',
+    description: 'Cambia 100 puntos de influencia por 100 de oro. Se puede repetir.',
+    icon: 'to-gold',
+    cost: 100,
+    currency: 'influence',
+    shop: 'sabotage',
+    tier: 1,
+    modifiers: [],
+    kind: 'exchange',
+    grants: { gold: 100 },
+  },
+];
+
+/**
  * Sabotage shop — influence.
  *
  * Every entry must have counterplay (GDD §11); the field is not decoration, and
@@ -366,7 +437,33 @@ export interface SabotageItem extends ShopItem {
   counterplay: string;
 }
 
+/**
+ * What a conjuring costs. Declared with the stock rather than with the module
+ * that spends it, so the price on the card and the price charged are one
+ * number.
+ */
+export const SUMMON_COST = 220;
+
 export const SABOTAGE_ITEMS: SabotageItem[] = [
+  {
+    id: 'sab.summon',
+    name: 'Convocar monstruos',
+    description:
+      'Señala un punto del mapa y aparecen 10 criaturas de la PRÓXIMA oleada, durante 60 s. ' +
+      'En el campo del rival avanzan hacia su Núcleo como una oleada más. En el tuyo luchan de ' +
+      'tu lado, no dañan a nadie de tu equipo, y puedes seleccionarlos y moverlos a tu antojo.',
+    counterplay:
+      'Duran un minuto y son la oleada que viene, no una peor: quien la esperaba ya sabe a qué se enfrenta.',
+    icon: 'anchor-shout',
+    cost: SUMMON_COST,
+    currency: 'influence',
+    tier: 1,
+    modifiers: [],
+    // Not an `action`: an action fires the moment it is bought, and this one
+    // has to wait for the player to point at the ground. The shop card arms
+    // the cursor and the `summon` command carries the spot.
+    kind: 'action',
+  },
   {
     id: 'sab.reinforcements',
     name: 'Refuerzos',
@@ -407,7 +504,9 @@ export const SABOTAGE_ITEMS: SabotageItem[] = [
   {
     id: 'sab.hex',
     name: 'Maleficio',
-    description: 'El daño y el poder de hechizo del héroe rival bajan un 20 % durante 15 s.',
+    description:
+      'El daño y el poder de hechizo de TODOS los héroes rivales bajan un 20 % durante 15 s. ' +
+      'Un aura morada gira a sus pies mientras dura.',
     counterplay: 'Dura poco: retirarse a la fuente y volver lo agota.',
     icon: 'flame',
     cost: 260,
@@ -421,8 +520,11 @@ export const SABOTAGE_ITEMS: SabotageItem[] = [
 /** Everything the hero shop sells: gear first, then consumables and books. */
 export const T1_STOCK: ShopItem[] = [...HERO_ITEMS, ...CONSUMABLE_ITEMS];
 
+/** Everything the sabotage shop sells: the money changer, then the sabotages. */
+export const T2_STOCK: ShopItem[] = [...EXCHANGE_ITEMS, ...SABOTAGE_ITEMS];
+
 /** Every purchasable, for lookup by id. */
-export const ALL_ITEMS: ShopItem[] = [...T1_STOCK, ...SABOTAGE_ITEMS];
+export const ALL_ITEMS: ShopItem[] = [...T1_STOCK, ...T2_STOCK];
 
 export function findItem(id: string): ShopItem | undefined {
   return ALL_ITEMS.find((i) => i.id === id);
@@ -451,6 +553,18 @@ export function validateShops(): string[] {
     }
     if (item.kind === 'book' && item.modifiers.length === 0 && !item.experience) {
       issues.push(`${item.id}: a book must grant something`);
+    }
+    if (item.kind === 'exchange') {
+      const gold = item.grants?.gold ?? 0;
+      const influence = item.grants?.influence ?? 0;
+      if (gold <= 0 && influence <= 0) {
+        issues.push(`${item.id}: an exchange must pay out something`);
+      }
+      // Paying gold to receive gold is either a money printer or a shredder,
+      // and a typo in the `grants` block is all it would take.
+      if ((item.currency === 'gold' && gold > 0) || (item.currency === 'influence' && influence > 0)) {
+        issues.push(`${item.id}: an exchange must pay out the other currency`);
+      }
     }
   }
   for (const item of SABOTAGE_ITEMS) {

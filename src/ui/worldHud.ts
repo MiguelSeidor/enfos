@@ -16,6 +16,7 @@
  */
 
 import type { EntityId, MatchState, Vec2 } from '@/core/contracts';
+import { isConcealed, summonLifeLeft } from '@/gameplay/units';
 import { DamageType, Faction, UnitKind } from '@/core/contracts';
 import type { RenderService } from '@/core/services';
 import { clamp01 } from '@/core/mathx';
@@ -47,6 +48,14 @@ const DROP_PULSE = 1.7;
 
 /** Click radius around a dropped item, in CSS pixels. */
 const DROP_HIT = 20;
+
+/**
+ * Seconds per turn of the hex aura.
+ *
+ * Slow enough to read as a circling thing rather than a flicker, fast enough
+ * that a 15-second hex turns about five times before it lifts.
+ */
+const HEX_SPIN = 2.8;
 
 /**
  * Coin capacity.
@@ -103,6 +112,11 @@ export class WorldHud {
   /** Screen circles the last frame drew, so a click can hit one. */
   private readonly dropHits: { id: number; x: number; y: number }[] = [];
   private dropClock = 0;
+  private hexClock = 0;
+  /** Set from `update`; see the health-bar skip. */
+  private observerTeam = 0;
+  /** Set from `update`: the conjured allies under the player's command. */
+  private picked: readonly EntityId[] = [];
 
   constructor(private readonly groundAt: (x: number, z: number) => number) {
     this.canvas = document.createElement('canvas');
@@ -347,7 +361,13 @@ export class WorldHud {
     playerHeroId: EntityId | null,
     selectedId: EntityId | null = null,
     hoveredId: EntityId | null = null,
+    /** Whose side the screen is on, so a concealed creep stays concealed. */
+    observerTeam = 0,
+    /** Conjured allies the player has picked out. */
+    picked: readonly EntityId[] = [],
   ): void {
+    this.observerTeam = observerTeam;
+    this.picked = picked;
     const g = this.g;
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     g.clearRect(0, 0, window.innerWidth, window.innerHeight);
@@ -356,11 +376,13 @@ export class WorldHud {
     this.drawMoveMarker(dt, render);
     // Under the units: a creep walking over a dropped shield should cover it.
     this.drawDrops(dt, render);
+    // Under the selection ring, which is the thing the player is steering by.
+    this.drawHexAuras(dt, match, render);
     // Hover under selection: a unit that is both keeps the stronger red ring.
     if (hoveredId !== null && hoveredId !== selectedId) {
       this.drawRing(match, render, hoveredId, 'rgba(255, 214, 122, 0.95)', 2);
     }
-    this.drawSelection(match, render, selectedId);
+    this.drawSelection(match, render, selectedId, playerHeroId);
     this.drawHealthBars(match, render, playerHeroId, hoveredId);
     // Coins under the numbers: they are scenery, the numbers are information.
     this.drawCoins(dt, render);
@@ -490,12 +512,118 @@ export class WorldHud {
     }
   }
 
+  /**
+   * A turning purple ring under every hexed hero.
+   *
+   * Maleficio hits both of the rival team's heroes at once, and the only sign
+   * of it was a line in the sabotage strip that named the effect but not who
+   * was carrying it. In a 2v2 that is not enough to play around.
+   *
+   * Read off the modifier the sabotage leaves on the unit rather than from a
+   * message, so the aura cannot outlive or precede the effect itself: it is
+   * drawn from the same state that is reducing the damage. 'sab.hex' is the
+   * `sourceId` in gameplay/sabotage.ts, named here the way 'status.elite' is
+   * in `drawHealthBars` — the HUD reads the simulation, it does not import it.
+   *
+   * Drawn for anyone hexed, friend or rival: being hexed yourself is the one
+   * case where you most need to know.
+   */
+  private drawHexAuras(dt: number, match: MatchState, render: RenderService): void {
+    this.hexClock += dt;
+    const g = this.g;
+    const spin = ((this.hexClock / HEX_SPIN) % 1) * Math.PI * 2;
+
+    for (const unit of match.units.values()) {
+      if (!unit.alive || unit.kind !== UnitKind.Hero) continue;
+      if (!unit.modifiers.some((m) => m.sourceId === 'sab.hex')) continue;
+
+      const ground = this.groundAt(unit.pos.x, unit.pos.z);
+      if (!render.project(unit.pos, ground + 0.12, this.screen)) continue;
+      // The same trick `drawRing` uses: size the ring off the unit's projected
+      // height, so it holds its proportions at every zoom.
+      const top = { x: 0, y: 0 };
+      render.project(unit.pos, ground + 2.2, top);
+      // Tight to the feet. A wider ring was the first attempt and it read as a
+      // scratch on the ground near the hero rather than as something on them.
+      const r = Math.max(13, Math.abs(this.screen.y - top.y) * 0.6);
+
+      g.save();
+      g.translate(this.screen.x, this.screen.y);
+      // Squashed, so it lies on the ground instead of standing up like a hoop.
+      g.scale(1, 0.42);
+
+      // The ground inside the ring glows, which is what separates an aura from
+      // a line. It breathes slowly so a stationary hero still reads as cursed.
+      const breath = 0.82 + 0.18 * Math.sin(this.hexClock * 2.2);
+      const glow = g.createRadialGradient(0, 0, 0, 0, 0, r);
+      glow.addColorStop(0, `rgba(150, 80, 230, ${0.34 * breath})`);
+      glow.addColorStop(0.65, `rgba(150, 80, 230, ${0.16 * breath})`);
+      glow.addColorStop(1, 'rgba(150, 80, 230, 0)');
+      g.fillStyle = glow;
+      g.beginPath();
+      g.arc(0, 0, r, 0, Math.PI * 2);
+      g.fill();
+
+      // A dim full circle holds the shape when the arcs are at the back.
+      g.beginPath();
+      g.arc(0, 0, r, 0, Math.PI * 2);
+      g.strokeStyle = 'rgba(168, 108, 236, 0.5)';
+      g.lineWidth = 2;
+      g.stroke();
+
+      // Three bright arcs, evenly spaced and turning: a solid ring that spins
+      // looks exactly like a ring that does not.
+      g.lineCap = 'round';
+      g.strokeStyle = 'rgba(214, 170, 255, 0.98)';
+      g.lineWidth = 4;
+      for (let i = 0; i < 3; i++) {
+        const from = spin + (i * Math.PI * 2) / 3;
+        g.beginPath();
+        g.arc(0, 0, r, from, from + 0.8);
+        g.stroke();
+      }
+
+      // Two motes orbiting against the arcs, to sell the rotation from above,
+      // where an ellipse's turn is hardest to see. Haloed, because a 3 px dot
+      // on grass at this zoom is a dead pixel.
+      for (let i = 0; i < 2; i++) {
+        const a = -spin * 1.4 + i * Math.PI;
+        const mx = Math.cos(a) * r;
+        const my = Math.sin(a) * r;
+        g.beginPath();
+        g.arc(mx, my, 6, 0, Math.PI * 2);
+        g.fillStyle = 'rgba(190, 130, 255, 0.35)';
+        g.fill();
+        g.beginPath();
+        g.arc(mx, my, 3.2, 0, Math.PI * 2);
+        g.fillStyle = 'rgba(240, 220, 255, 1)';
+        g.fill();
+      }
+      g.restore();
+    }
+  }
+
   /** Reticle around the unit the player has picked as their attack target. */
   private drawSelection(
     match: MatchState,
     render: RenderService,
     selectedId: EntityId | null,
+    playerHeroId: EntityId | null,
   ): void {
+    // The hero gets a ring whenever nothing else has the player's orders, so
+    // "who am I driving" is always answered on the ground rather than by
+    // elimination. Green, the colour its own health bar already uses, against
+    // the gold of a conjured pack and the red of an attack target.
+    if (this.picked.length === 0 && playerHeroId !== null) {
+      this.drawRing(match, render, playerHeroId, 'rgba(74, 208, 106, 0.9)', 2, 0.7);
+    }
+    // Gold under the conjured allies the player is commanding, red under the
+    // unit the hero is attacking. Two different questions — "who obeys me" and
+    // "what am I hitting" — so two colours, and the gold goes down first so a
+    // summon that is also the attack target still reads as the target.
+    for (const id of this.picked) {
+      this.drawRing(match, render, id, 'rgba(245, 221, 162, 0.95)', 2, 0.62);
+    }
     if (selectedId === null) return;
     this.drawRing(match, render, selectedId, 'rgba(255, 82, 60, 0.95)', 2.5);
   }
@@ -507,6 +635,8 @@ export class WorldHud {
     id: EntityId,
     colour: string,
     width: number,
+    /** Tightens the ring. The attack reticle wants room; a selection does not. */
+    scale = 1,
   ): void {
     const unit = match.units.get(id);
     if (!unit || !unit.alive) return;
@@ -517,7 +647,7 @@ export class WorldHud {
     // relative to the target at every zoom level.
     const top = { x: 0, y: 0 };
     render.project(unit.pos, ground + 2.2, top);
-    const r = Math.max(14, Math.abs(this.screen.y - top.y) * 0.85);
+    const r = Math.max(14, Math.abs(this.screen.y - top.y) * 0.85) * scale;
 
     const g = this.g;
     g.save();
@@ -544,6 +674,11 @@ export class WorldHud {
     const g = this.g;
     for (const unit of match.units.values()) {
       if (!unit.alive) continue;
+      // A bar over a creep nobody can see is the creep. The mesh hides itself
+      // in `AuthoredView.setConcealed` and the raycast skips it for free,
+      // because an invisible object is not a hit; this one is drawn from match
+      // state rather than from the scene, so it has to ask.
+      if (isConcealed(unit.id, this.observerTeam, match.tick)) continue;
       const fraction = clamp01(unit.health / Math.max(1, unit.stats.maxHealth));
       // A full-health creep bar is visual noise; heroes and bosses always show,
       // and so does whatever the cursor is over — asking "how hurt is this one"
@@ -552,8 +687,16 @@ export class WorldHud {
       // player can find the one creep that is worth focusing.
       // 'status.elite' is `ELITE_STATUS` in gameplay/sabotage.ts.
       const elite = unit.statuses.some((s) => s.defId === 'status.elite');
+      // A picked summon always shows, whole or not: its bar is where its
+      // remaining time is drawn, and a clock that only appears once the thing
+      // is hurt is no clock at all.
+      const picked = this.picked.includes(unit.id);
       const always =
-        unit.kind === UnitKind.Hero || unit.kind === UnitKind.Boss || elite || unit.id === hoveredId;
+        unit.kind === UnitKind.Hero ||
+        unit.kind === UnitKind.Boss ||
+        elite ||
+        picked ||
+        unit.id === hoveredId;
       if (!always && fraction >= 0.999) continue;
 
       const clearance = unit.kind === UnitKind.Boss ? 4.2 : unit.kind === UnitKind.Hero ? 2.9 : 2.3;
@@ -575,6 +718,20 @@ export class WorldHud {
       g.strokeStyle = elite ? 'rgba(255, 220, 120, 0.9)' : 'rgba(255,255,255,0.28)';
       g.lineWidth = 1;
       g.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+
+      // The conjuring's clock, a thinner bar sitting on top of the health one.
+      // Only for the ones the player has picked out: ten of these draining at
+      // once, unasked, would be noise over the fight they were bought for.
+      const life = picked ? summonLifeLeft(unit.id, match.tick) : null;
+      if (life !== null) {
+        const ly = y - h - 3;
+        g.fillStyle = 'rgba(0,0,0,0.72)';
+        g.fillRect(x - 1, ly - 1, w + 2, 4);
+        // Gold while there is time, red once it is nearly out, so the player
+        // can see which half of the pack is about to leave without reading it.
+        g.fillStyle = life > 0.25 ? '#f5dda2' : '#d8452f';
+        g.fillRect(x, ly, w * life, 2);
+      }
 
       // Exact figures for the hovered unit only. On every bar at once this is
       // unreadable at wave size; on one it answers "can I finish this".

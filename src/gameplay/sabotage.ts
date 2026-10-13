@@ -21,13 +21,23 @@
  * with the match RNG — it is part of what every client must agree on.
  */
 
-import type { EntityId, GameContext, GameModule, StatModifier, TeamId, UnitState } from '@/core/contracts';
+import type {
+  EntityId,
+  GameContext,
+  GameModule,
+  StatModifier,
+  TeamId,
+  UnitState,
+  Vec2,
+} from '@/core/contracts';
 import { Faction, UnitKind } from '@/core/contracts';
 import { SIM_STEP } from '@/core/engine';
+import { cos, sin } from '@/core/detmath';
 import { TerrainKey } from '@/core/services';
 import type { CombatModule } from './combat';
 import type { MatchModule } from './match';
 import { runtimeOf, type UnitModule } from './units';
+import { SUMMON_COST } from '@/economy/items';
 import { planWave } from './waves';
 import { BOSSES } from './defs';
 
@@ -39,6 +49,14 @@ const REINFORCEMENT_INTERVAL = 0.7;
 const FRENZY_SECONDS = 20;
 const FRENZY_SPEED = 0.25;
 const HEX_SECONDS = 15;
+
+/** How many creeps one conjuring puts on the field. */
+const SUMMON_COUNT = 10;
+/** How long they last, in seconds. */
+const SUMMON_SECONDS = 60;
+/** Spread of the pack around the chosen spot, in metres. */
+const SUMMON_SPREAD = 3.2;
+
 const HEX_DAMAGE = -0.2;
 
 /** Status marker on an elite creep; the world HUD draws its bar in gold. */
@@ -145,6 +163,137 @@ export class SabotageModule implements GameModule {
     return { ok: true };
   }
 
+  /**
+   * Conjures a pack of ten where the player pointed.
+   *
+   * Which side of the map the spot falls on decides whose creatures they are,
+   * and that is the whole feature:
+   *
+   * - **On the rival's half** they are ordinary hostiles. They pick the lane
+   *   up at the spot they land on — `laneIndexNear`, the same rule a boss's
+   *   minions use — so they walk on toward that Core and never back up the way
+   *   they came.
+   * - **On your own half** they take your team's faction instead. `isHostileTo`
+   *   then has them fight the wave and ignore every hero on the field, yours
+   *   and the rival's, which is exactly "they will not hurt you or your
+   *   allies". They hold the ground they were put on rather than marching,
+   *   because the lane only runs one way and a bodyguard that walks off to the
+   *   enemy Core is not a bodyguard.
+   *
+   * The kinds come from the NEXT wave rather than the current one: the player
+   * is buying a preview of what is about to arrive, which is what makes the
+   * defensive use a read on the match instead of a lottery.
+   */
+  summon(heroId: EntityId, pos: Vec2): { ok: boolean; reason?: string } {
+    const hero = this.ctx.match.heroes.get(heroId);
+    if (!hero || !hero.alive) return { ok: false, reason: 'Sin héroe' };
+    if (hero.influence < SUMMON_COST) return { ok: false, reason: 'Influencia insuficiente' };
+
+    // Never a boss wave: ten dragons for 220 influence would end the match.
+    const next = Math.max(1, this.ctx.match.wave + 1);
+    let plan = planWave(next, this.ctx.match.seed);
+    if (plan.isBoss) plan = planWave(Math.max(1, next - 1), this.ctx.match.seed);
+    const entries = plan.entries.filter((e) => BOSSES[e.defKey] === undefined);
+    if (entries.length === 0) return { ok: false, reason: 'Nada que convocar' };
+
+    const team = hero.team as TeamId;
+    // The map is mirrored on x and team 0 holds the negative half.
+    const homeSign = team === 1 ? 1 : -1;
+    const rival = this.match.rivalsOf(team)[0];
+    // With no rival there is no far half to send anything to: a solo match
+    // builds one site, so a pack pointed across the map would march a lane
+    // toward a Core that does not exist. Everything conjured is yours.
+    const mine = rival === undefined || Math.sign(pos.x) === homeSign || pos.x === 0;
+    const siteTeam: TeamId = mine ? team : rival;
+
+    hero.influence -= SUMMON_COST;
+    const until = this.ctx.clock.tick + Math.round(SUMMON_SECONDS / SIM_STEP);
+    const ids: EntityId[] = [];
+    for (let i = 0; i < SUMMON_COUNT; i++) {
+      const pick = this.ctx.rng.weighted(entries, (e) => e.count);
+      // A ring, so ten bodies do not arrive inside one another and spend their
+      // first second pushing apart.
+      const a = (i / SUMMON_COUNT) * Math.PI * 2;
+      const at = {
+        x: pos.x + cos(a) * SUMMON_SPREAD,
+        z: pos.z + sin(a) * SUMMON_SPREAD,
+      };
+      const unit = this.units.spawnEnemy(pick.defKey, at, siteTeam, plan.difficulty);
+      const runtime = runtimeOf(unit.id);
+      if (runtime) {
+        runtime.expiresAtTick = until;
+        runtime.summonedAtTick = this.ctx.clock.tick;
+        runtime.allied = mine;
+      }
+      if (mine) {
+        // The allegiance lives in the faction, which is what combat reads.
+        unit.faction = (team === 1 ? Faction.TeamB : Faction.TeamA) as Faction;
+        unit.team = team;
+      }
+      ids.push(unit.id);
+    }
+
+    this.ctx.bus.emit('ui:notify', {
+      text: mine ? `Has convocado ${SUMMON_COUNT} aliados` : `Has enviado ${SUMMON_COUNT} monstruos`,
+      severity: 'reward',
+      heroId,
+    });
+    if (!mine) {
+      this.ctx.bus.emit('ui:notify', {
+        text: 'Monstruos convocados en tu campo', severity: 'danger', team: siteTeam,
+      });
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Sends conjured creeps to a spot.
+   *
+   * Only your own, and only summons: the order is a player's, and a command
+   * that could walk the rival's wave off the lane would be a different game.
+   */
+  herd(
+    heroId: EntityId,
+    ids: EntityId[],
+    order: 'move' | 'attackMove' | 'attack' | 'hold',
+    pos?: Vec2,
+    targetId?: EntityId,
+  ): void {
+    const hero = this.ctx.match.heroes.get(heroId);
+    if (!hero) return;
+    // An attack order at something that is already dead, or at one of your own,
+    // is dropped whole rather than sent to ten creeps one by one.
+    const victim = order === 'attack' && targetId !== undefined
+      ? this.ctx.match.units.get(targetId)
+      : undefined;
+    if (order === 'attack' && (!victim || !victim.alive || victim.team === hero.team)) return;
+
+    for (const id of ids) {
+      const unit = this.ctx.match.units.get(id);
+      const runtime = runtimeOf(id);
+      if (!unit || !unit.alive || !runtime?.allied || unit.team !== hero.team) continue;
+      if (order === 'hold') {
+        runtime.holding = true;
+        runtime.orderPos = undefined;
+        unit.targetId = null;
+        continue;
+      }
+      // Any order to go somewhere, or at something, releases the hold.
+      runtime.holding = false;
+      if (order === 'attack') {
+        unit.targetId = targetId ?? null;
+        runtime.orderPos = undefined;
+        runtime.passive = false;
+      } else if (pos) {
+        runtime.orderPos = { x: pos.x, z: pos.z };
+        // A march engages; a move walks past. That is the whole difference
+        // between the two, and it is why `A` is worth having.
+        runtime.passive = order === 'move';
+        if (order === 'move') unit.targetId = null;
+      }
+    }
+  }
+
   /** Sabotages in progress, for the HUD. */
   active(): ActiveSabotage[] {
     const tick = this.ctx.clock.tick;
@@ -161,6 +310,18 @@ export class SabotageModule implements GameModule {
 
   fixedUpdate(): void {
     const tick = this.ctx.clock.tick;
+
+    // Conjured creeps have a deadline. Swept here rather than in the unit
+    // module because this is where they were made, and a minute is long
+    // enough that scanning the field once a tick for them would be the only
+    // thing this list ever costs.
+    for (const unit of [...this.ctx.match.units.values()]) {
+      const runtime = runtimeOf(unit.id);
+      if (runtime?.expiresAtTick === undefined || tick < runtime.expiresAtTick) continue;
+      // Despawned rather than killed: a conjuring that ends should not pay a
+      // bounty to whoever happens to be standing next to it.
+      this.units.despawn(unit.id);
+    }
 
     for (let i = 0; i < this.spawns.length; ) {
       const s = this.spawns[i]!;

@@ -7,8 +7,12 @@ import type { GameModule } from '@/core/contracts';
 import { UnitViewModule } from './unitView';
 import { ShowcaseModule } from './showcase';
 
-export function createUnitModules(showcase: boolean): GameModule[] {
-  const modules: GameModule[] = [new UnitViewModule()];
+export function createUnitModules(
+  showcase: boolean,
+  /** Whose side the screen is on, for drawing concealed creeps. */
+  localTeam: () => number = () => 0,
+): GameModule[] {
+  const modules: GameModule[] = [new UnitViewModule(localTeam)];
   if (showcase) modules.push(new ShowcaseModule());
   return modules;
 }
