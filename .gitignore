@@ -31,6 +31,9 @@ qa/shots/
 /crusader/
 /mutantbrain/
 /infernaldog/
+/demonson/
+/4hands/
+/giangdemon/
 /export/
 
 # Intermediate conversion output, kept beside the real part files but never
@@ -44,3 +47,8 @@ public/models/parts/full-raw.glb
 /image-*.png
 /*_Generated_Image_*
 bash.exe.stackdump
+
+# Conversion staging. docs/CREEP_FROM_FBX.md unpacks a pack here, runs
+# tools/fbx-to-creep.mjs against it and deletes it again; it is raw source
+# under another name.
+public/_src/
