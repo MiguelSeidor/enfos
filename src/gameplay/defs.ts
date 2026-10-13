@@ -182,31 +182,16 @@ export const ENEMIES: Record<string, EnemyDef> = {
   // Each of these asks a different question of the player. They are costed
   // above their raw stats because the answer is attention, not damage.
 
-  /**
-   * Hovers above the lane, seeing and being seen over the ridges.
-   *
-   * It used to fly straight at the Core and ignore the corridor entirely, which
-   * is what made it a repositioning problem rather than a fight. That was cut
-   * on 2026-10-04: it asked the player to hold two places at once, and the
-   * creature has no art yet, so it arrived invisible. Deliberately fragile —
-   * it is a timer, not a fight — and right now that is all it is.
-   */
-  wraith: {
-    characterId: 'creep.stalker',
-    name: 'Espectro alado',
-    behavior: 'siege',
-    stats: stats({
-      maxHealth: 210,
-      attackDamage: 18,
-      attackSpeed: 0.8,
-      moveSpeed: 6.2,
-      armor: 2,
-    }),
-    bounty: { gold: 22, xp: 26 },
-    cost: 22,
-    scale: 0.95,
-    traits: { flying: { altitude: 6.5 } },
-  },
+  // The Espectro alado used to live here: a flier at 6.5 m, `creep.stalker`,
+  // `traits.flying`. Removed on 2026-10-11 rather than shipped unpainted. It
+  // had never had art, and the only way to give it some was to bind the
+  // horned, wingless demon that the Acechador now uses — a wingless flier
+  // hovering six metres up reads worse than nothing at all.
+  //
+  // What it needs is a winged model. Everything else it needs still exists:
+  // `traits.flying` is implemented, `death.wraith` is still mapped in
+  // audio/audio.ts and its cry is still built in audio/sounds.ts. Bringing it
+  // back is this block, an art slot and one line in the wave pool.
 
   /**
    * Unseen until it strikes.
@@ -216,7 +201,10 @@ export const ENEMIES: Record<string, EnemyDef> = {
    * it is the whole difficulty.
    */
   prowler: {
-    characterId: 'creep.stalker',
+    // Its own slot since the demon arrived. The Espectro alado above still
+    // points at `creep.stalker` and still has no art: the demon has horns and
+    // no wings, and a wingless flier at 6.5 m would be worse than invisible.
+    characterId: 'creep.prowler',
     name: 'Acechador velado',
     behavior: 'hunter',
     stats: stats({

@@ -3226,6 +3226,30 @@ const breaker: CharacterDef = {
   visual: visual('creep.breaker', 'pot-bellied-ogre-club', OGRE_PALETTE, 1, ['skin', 'leather']),
 };
 
+// ──────────────────────────────────────────────────────────────────────────────
+// 12. Acechador velado — melee creep with a sword
+//
+// An art slot of its own rather than `creep.stalker`, which it used to share
+// with the Espectro alado: that one was a flier and this demon is horned and
+// wingless. The Espectro has since been removed from defs.ts altogether, and
+// `creep.stalker` with it, rather than ship a wingless flier six metres up.
+//
+// This procedural build is a FALLBACK ONLY: it is drawn if demon.glb fails to
+// load, and nothing else. See `creep.prowler` in AUTHORED_MANIFEST
+// (build/authoredCharacter.ts).
+const prowler: CharacterDef = {
+  ...duskrunner,
+  id: 'creep.prowler',
+  name: 'Acechador velado',
+  // Its own descriptor, and the reason is the one written against the
+  // Rompehuesos above: `unitView.resolveDef` looks a character up by
+  // `visual.rigId`, so a spread that keeps the Devorador's descriptor resolves
+  // this creep straight back to the Devorador. The authored model is then
+  // never asked for, the creature renders through the procedural batch, and
+  // nothing is logged because from the view's side nothing went wrong.
+  visual: visual('creep.prowler', 'quadruped-long-back-tail', WOLF_PALETTE, 1, ['leather', 'skin']),
+};
+
 export const CHARACTERS: readonly CharacterDef[] = [
   bulwark,
   oracle,
@@ -3236,6 +3260,7 @@ export const CHARACTERS: readonly CharacterDef[] = [
   duskrunner,
   bastion,
   breaker,
+  prowler,
   hexwright,
   titan,
 ];

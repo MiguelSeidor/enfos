@@ -198,12 +198,13 @@ export function planWave(wave: number, seed: number, teamSize = 1): WavePlan {
   // `skeleton` is absent on purpose — it is a summon, not a wave entry, and its
   // zero cost would let the composer buy an unbounded number of them.
   //
-  // `wraith` sits at 25 rather than 10 because its character has no art: the
-  // slot `creep.stalker` does not exist in the catalog, so the creature renders
-  // as nothing at all and arrives with no warning a player can act on. Moving
-  // it past the point a run normally reaches is the cheap fix, and it costs
-  // nothing to undo: when the art lands, put it back at 10 and the wave curve
-  // is what it was. `prowler` shares that missing slot and is still at 18.
+  // `wraith` used to sit at 25, parked there because it had no art. It is
+  // gone from defs.ts entirely now; when a winged model turns up it comes back
+  // here at 10, which is where it was designed to arrive.
+  //
+  // `prowler` keeps its 18. It is the only creep with `traits.invisible`, so
+  // from wave 18 on it is the one thing the Ver lo invisible power exists to
+  // answer, and it now has a model to be revealed as.
   const pool: string[] = ['cleaver'];
   if (wave >= 2) pool.push('duskrunner');
   if (wave >= 3) pool.push('spinebolt');
@@ -212,7 +213,6 @@ export function planWave(wave: number, seed: number, teamSize = 1): WavePlan {
   if (wave >= 14) pool.push('breaker');
   if (wave >= 18) pool.push('prowler');
   if (wave >= 22) pool.push('necromancer');
-  if (wave >= 25) pool.push('wraith');
 
   let budget = budgetFor(wave) * (1 + PER_EXTRA_DEFENDER * (Math.max(1, teamSize) - 1));
   const counts = new Map<string, number>();

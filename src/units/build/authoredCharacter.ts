@@ -109,9 +109,17 @@ export interface AuthoredEntry {
  */
 export const AUTHORED_MANIFEST: Record<string, AuthoredEntry> = {
   'creep.cleaver': { url: '/models/orc.glb', height: 2.0 },
-  'creep.duskrunner': { url: '/models/mutant.glb', height: 2.0 },
+  // A horned demon toad, replacing the mutant. 1.25 rather than the mutant's
+  // 2.0 because this one is long and low rather than upright: the manifest
+  // normalises the bounding box in Y, so asking for 2 m of height on a
+  // sprawling quadruped would give a toad three metres from nose to tail.
+  'creep.duskrunner': { url: '/models/giang.glb', height: 1.25 },
   'creep.spinebolt': { url: '/models/erika.glb', height: 1.75 },
   'creep.breaker': { url: '/models/crusader.glb', height: 1.95 },
+  // The demon stands a shade taller than the Rompehuesos and is read at 79 px
+  // beside it, so the horns are what has to carry the difference, not the
+  // height. `prowler` also applies its own scale of 0.95 on top of this.
+  'creep.prowler': { url: '/models/demon.glb', height: 2.0 },
   // The first hero with authored art. 2.62 is its own `proportions.height`, so
   // the authored Bulwark stands exactly where the procedural one stood and no
   // camera, health bar or selection ring has to be touched.
