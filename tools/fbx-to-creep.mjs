@@ -107,6 +107,107 @@ const CHARACTERS = {
     },
   },
 
+  /**
+   * Acechador velado — `creep.prowler`.
+   *
+   * A horned demon with a sword, from the "Horny Demonson" pack. Three things
+   * about this pack are worth knowing before touching any of the numbers:
+   *
+   * 1. **Every clip carries the whole pack's timeline.** Idle declares 2.33 s,
+   *    Idle_3 declares 115.67 s, and the motion in each file sits in the last
+   *    second or two of its own slot — an Unreal/Max export where each take
+   *    keeps its offset on a shared ruler. Every window below was measured by
+   *    sampling the skeleton, never read off the declared duration.
+   * 2. **The sword is one rigid mesh on one bone**, `Gun_Dummy`, carrying all
+   *    4,686 of its vertices. Same arrangement as the orc's axes, and bone
+   *    reduction has eaten a weapon on this project twice, so it is named in
+   *    `verifyBones` and the conversion fails loudly if it ever goes.
+   * 3. **The textures arrive as 4096² TIFF**, which no browser decodes. They
+   *    are converted to PNG before staging; see docs/CREEP_FROM_FBX.md.
+   *
+   * There is no flinch clip in the pack, so `hit` is absent and `AuthoredView`
+   * falls back to the idle. A demon that does not react to a hit is a smaller
+   * loss than a death reused as a flinch.
+   */
+  demon: {
+    out: 'public/models/demon.glb',
+    base: 'base.fbx',
+    atlas: {
+      width: 2048,
+      height: 1024,
+      parts: [
+        { material: 'MTL_BODY', file: 'body.png', x: 0, y: 0, w: 1024, h: 1024 },
+        { material: 'MTL_Sword', file: 'weapon.png', x: 1024, y: 0, w: 1024, h: 1024 },
+      ],
+    },
+    // 15,680 body triangles down to 2,800 and 1,562 of sword down to 700. The
+    // sword keeps a proportionally larger share because a blade is an edge and
+    // an edge is the first thing decimation rounds off.
+    budget: { MTL_BODY: 2800, MTL_Sword: 700 },
+    verifyBones: ['Gun_Dummy'],
+    clips: {
+      // The only clip whose motion fills its own slot.
+      idle: { file: 'Anim_Horny_Demonson_Idle.FBX', trim: 'window', window: [0, 2.33] },
+      walk: { file: 'Anim_Horny_Demonson_Walk.FBX', trim: 'window', window: [6.65, 8.33] },
+      run: { file: 'Anim_Horny_Demonson_Run.FBX', trim: 'window', window: [16.64, 18.0] },
+      // Atack_1 of the five: 1.45 s of useful motion, the shortest and the
+      // cleanest single swing. The others run 2.4 s to 6.3 s and read as
+      // choreography rather than as a creep hitting something.
+      attack: { file: 'Anim_Horny_Demonson_Atack_1.FBX', trim: 'window', window: [23.22, 24.67] },
+      // The roar serves as the cast, the way the orc's does.
+      cast: { file: 'Anim_Horny_Demonson_Rage.FBX', trim: 'window', window: [59.82, 63.0] },
+      // Measured to 44.57, not to the declared 45.33: the last 0.76 s is the
+      // body lying still, and a corpse that keeps playing is a corpse that
+      // gets back up — which is exactly what Bulwark did.
+      death: { file: 'Anim_Horny_Demonson_Dying.FBX', trim: 'window', window: [43.05, 44.57] },
+    },
+  },
+
+  /**
+   * Devorador — `creep.duskrunner`. A horned demon toad.
+   *
+   * The pack that replaced the mutant, and the first one here laid out as a
+   * single FBX holding every take: 126 MB, 34 animations, all named and all
+   * already trimmed to a sensible length by whoever exported them. Nothing
+   * below needs a measured window, which is a first.
+   *
+   * `take` picks the animation out of that file by name; without it every
+   * clip would have been whichever take happened to come first.
+   *
+   * Reallusion CC4 skeleton (`RL_BoneRoot`, `Bip001_*`), the same family as
+   * Bulwark's, so none of the Z-up or in-place handling that ActorCore needs
+   * applies: this one exports Y-up and its locomotion is already in place.
+   */
+  giang: {
+    out: 'public/models/giang.glb',
+    base: 'giang.fbx',
+    atlas: {
+      width: 2048,
+      height: 1024,
+      parts: [
+        { material: 'Body_A1', file: 'giang-body.png', x: 0, y: 0, w: 1024, h: 1024 },
+        { material: 'Horn_A1', file: 'giang-horn.png', x: 1024, y: 0, w: 512, h: 512 },
+        // 120 triangles of eye. A full cell for it would be 256 px of atlas
+        // spent on something two pixels wide in play.
+        { material: 'Eye_A1', file: 'giang-eye.png', x: 1536, y: 0, w: 256, h: 256 },
+      ],
+    },
+    // 9,255 body triangles down to 3,000: it arrives close to budget already,
+    // so the cut is gentle and the warty silhouette survives it.
+    budget: { Body_A1: 3000, Horn_A1: 600, Eye_A1: 120 },
+    clips: {
+      idle: { file: 'giang.fbx', take: 'Idle', trim: 'loop' },
+      walk: { file: 'giang.fbx', take: 'Walk', trim: 'loop' },
+      run: { file: 'giang.fbx', take: 'Run', trim: 'loop' },
+      attack: { file: 'giang.fbx', take: 'Atk', trim: 'loop' },
+      // The roar, for the cast slot, the way the orc's serves there.
+      cast: { file: 'giang.fbx', take: 'Roar', trim: 'loop' },
+      // A real flinch, which the demon's pack did not have at all.
+      hit: { file: 'giang.fbx', take: 'Beaten', trim: 'loop' },
+      death: { file: 'giang.fbx', take: 'Death', trim: 'loop' },
+    },
+  },
+
   erika: {
     out: 'public/models/erika.glb',
     base: 'base.fbx',
@@ -411,12 +512,6 @@ const inPage = async (character) => {
     // put that material on the body sheet and the shield renders in tabard
     // checks, put it on the weapon sheet and the pauldrons and knee cops turn
     // to grey smears. The split has to come from the mesh names.
-    let name = (Array.isArray(part.material) ? part.material[0] : part.material).name || 'default';
-    for (const rule of character.materialByMesh ?? []) {
-      if (new RegExp(rule.test, 'i').test(part.name)) { name = rule.material; break; }
-    }
-    if (!byMaterial.has(name)) byMaterial.set(name, []);
-
     const pos = new Float32Array(count * 3);
     const nrm = new Float32Array(count * 3);
     const uv = new Float32Array(count * 2);
@@ -451,8 +546,62 @@ const inPage = async (character) => {
       }
     }
     const index = g.index ? Array.from(g.index.array) : [...Array(count).keys()];
-    byMaterial.get(name).push({ count, pos, nrm, uv, si, sw, index });
-    vertexTotal += count;
+
+    // One chunk per DRAW GROUP, not one per submesh.
+    //
+    // A submesh can carry more than one material, split by group: the toad
+    // keeps its horns and its body in a single mesh, 776 triangles against
+    // 8,479. Reading `material[0]` for the whole thing filed the body under
+    // `Horn_A1`, which put it in the horn's atlas cell and on the horn's
+    // 600-triangle budget: 9,255 triangles came out as 599 and the creature
+    // arrived as a smear. A mesh with no groups gets one implicit group over
+    // all of its indices, which is exactly what every pack before this did.
+    const mats = Array.isArray(part.material) ? part.material : [part.material];
+    const groups = g.groups.length
+      ? g.groups
+      : [{ start: 0, count: index.length, materialIndex: 0 }];
+    for (const group of groups) {
+      let name = (mats[group.materialIndex ?? 0] ?? mats[0]).name || 'default';
+      // The crusader's override still wins: its split comes from mesh names,
+      // because its author left one material across pieces that need two.
+      for (const rule of character.materialByMesh ?? []) {
+        if (new RegExp(rule.test, 'i').test(part.name)) { name = rule.material; break; }
+      }
+      if (!byMaterial.has(name)) byMaterial.set(name, []);
+
+      // Compacted to the vertices this group actually references. Handing each
+      // group the submesh's whole vertex buffer would ship one copy per
+      // material, and the copies would not weld away: each lands in a
+      // different atlas cell, so their UVs differ.
+      const remap = new Map();
+      const gIndex = [];
+      for (let i = group.start; i < group.start + group.count; i++) {
+        const from = index[i];
+        let to = remap.get(from);
+        if (to === undefined) { to = remap.size; remap.set(from, to); }
+        gIndex.push(to);
+      }
+      const n2 = remap.size;
+      const gPos = new Float32Array(n2 * 3);
+      const gNrm = new Float32Array(n2 * 3);
+      const gUv = new Float32Array(n2 * 2);
+      const gSi = new Uint16Array(n2 * 4);
+      const gSw = new Float32Array(n2 * 4);
+      for (const [from, to] of remap) {
+        for (let c = 0; c < 3; c++) {
+          gPos[to * 3 + c] = pos[from * 3 + c];
+          gNrm[to * 3 + c] = nrm[from * 3 + c];
+        }
+        gUv[to * 2] = uv[from * 2];
+        gUv[to * 2 + 1] = uv[from * 2 + 1];
+        for (let k = 0; k < 4; k++) {
+          gSi[to * 4 + k] = si[from * 4 + k];
+          gSw[to * 4 + k] = sw[from * 4 + k];
+        }
+      }
+      byMaterial.get(name).push({ count: n2, pos: gPos, nrm: gNrm, uv: gUv, si: gSi, sw: gSw, index: gIndex });
+      vertexTotal += n2;
+    }
   }
   say('mergedVerts', vertexTotal);
   say('materials', [...byMaterial.keys()].join(', '));
@@ -493,26 +642,39 @@ const inPage = async (character) => {
   const tga = new TGALoader();
   const plain = new THREE.TextureLoader();
   const shrink = async (url, size) => {
-    // TGA arrives as raw rows bottom-up and has to be drawn flipped; a PNG
-    // arrives as an image the canvas already orients correctly. Treating both
-    // the same turns one of them upside down.
+    // EVERY image goes into its cell upside down, whatever its format.
+    //
+    // The atlas is sampled with `flipY = false`, so v=0 is the canvas's top
+    // row, while the UVs in an FBX assume v=0 is the image's BOTTOM row. The
+    // remap into a cell is a plain linear scale with no flip of its own, so
+    // the only place that difference can be paid is here.
+    //
+    // This used to flip the TGA branch and not the PNG one, on the reasoning
+    // that a PNG "arrives oriented correctly" — true of the image and beside
+    // the point. The toad showed what it costs: its body UVs landed on the
+    // red of its own mouth and it rendered as a pink blob, while its texture
+    // sat there plainly purple. The demon was wrong the same way and nobody
+    // noticed, because a mirrored texture on a lumpy creature just looks like
+    // a lumpy creature.
     const isTga = /.tga$/i.test(url);
     const tex = isTga ? await tga.loadAsync(url) : await plain.loadAsync(url);
     const src = tex.image;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d');
+    let drawable = src;
     if (isTga) {
+      // TGALoader hands back raw pixels rather than an image, so they have to
+      // go through a canvas before they can be drawn.
       const tmp = document.createElement('canvas');
       tmp.width = src.width; tmp.height = src.height;
       tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(src.data), src.width, src.height), 0, 0);
-      ctx.save();
-      ctx.scale(1, -1);
-      ctx.drawImage(tmp, 0, -size, size, size);
-      ctx.restore();
-    } else {
-      ctx.drawImage(src, 0, 0, size, size);
+      drawable = tmp;
     }
+    ctx.save();
+    ctx.scale(1, -1);
+    ctx.drawImage(drawable, 0, -size, size, size);
+    ctx.restore();
     const out = new THREE.CanvasTexture(canvas);
     out.colorSpace = THREE.SRGBColorSpace;
     out.flipY = false;
@@ -646,12 +808,34 @@ const inPage = async (character) => {
   mesh.name = 'orc';
   // The bones live under the FBX root; keep that hierarchy and hang the mesh
   // beside it so the exporter writes a complete skin.
+  //
+  // EVERY bone root, not just the one `bones[0]` happens to sit under. A pack
+  // can hang more than one bone tree off the FBX root -- the demon has two,
+  // `Bip001` with 118 bones and `Gun_Dummy` holding the sword, as siblings --
+  // and `bones[0]` is the first bone of the first SUBMESH, which for that pack
+  // is the sword. Climbing from it and adding that one subtree exported a
+  // skeleton of exactly one bone: a GLB with 3 nodes, a skin claiming 82
+  // joints, and 81 of them null. The loader rejected the file outright with
+  // "Cannot set properties of undefined (setting 'isBone')", which names
+  // nothing and points nowhere.
   const root = new THREE.Group();
   root.name = 'orc_root';
-  const boneRoot = bones[0];
-  let top = boneRoot;
-  while (top.parent && top.parent.isBone) top = top.parent;
-  root.add(top);
+  const topOf = (bone) => {
+    let top = bone;
+    while (top.parent && top.parent.isBone) top = top.parent;
+    return top;
+  };
+  const boneRoots = new Set(bones.map(topOf));
+  // The source submeshes are already merged into `mesh` and must not travel
+  // with the skeleton. In most packs they are siblings of the bone root, so a
+  // fresh Group left them behind for free; the demon parents its `Pauldron`
+  // ten levels down, under `Bip001_Pauldron`, and it rode along. What the
+  // exporter then said was "No valid image data found. Unable to process
+  // texture" -- the original material still points at a 4096 TIFF the loader
+  // could not decode -- which names neither the mesh nor the reason.
+  for (const part of parts) part.removeFromParent();
+  for (const top of boneRoots) root.add(top);
+  say('boneRoots', [...boneRoots].map((b2) => b2.name).join(', '));
   root.add(mesh);
   mesh.bind(skeleton, new THREE.Matrix4());
   root.updateMatrixWorld(true);
@@ -830,10 +1014,31 @@ const inPage = async (character) => {
   const clipInfo = [];
   const unmatched = new Set();
   const loader = new FBXLoader();
+  /**
+   * One parse per file, not one per clip.
+   *
+   * A pack can ship every take inside a single FBX -- the toad's is 126 MB
+   * with 34 of them -- and that file takes nine seconds to parse. Six clips
+   * reading it meant a minute of re-parsing the same bytes.
+   */
+  const fbxCache = new Map();
+  const loadFbx = async (file) => {
+    if (!fbxCache.has(file)) fbxCache.set(file, await loader.loadAsync('/_src/anim/' + file));
+    return fbxCache.get(file);
+  };
   for (const [id, source] of Object.entries(clipSources)) {
-    const fbx = await loader.loadAsync('/_src/anim/' + source.file);
-    const clip = fbx.animations[0];
-    if (!clip) continue;
+    const fbx = await loadFbx(source.file);
+    // `take` picks one animation out of a file that holds several, by the name
+    // the pack gave it. Without it the first take wins, which is right for a
+    // file-per-clip pack and silently wrong for a file-of-everything one: the
+    // toad would have walked, run, attacked and died all playing `Walk2`.
+    const clip = source.take
+      ? fbx.animations.find((a) => a.name === source.take)
+      : fbx.animations[0];
+    if (!clip) {
+      const had = fbx.animations.map((a) => a.name).join(', ');
+      throw new Error(`clip ${id}: no take named "${source.take}" in ${source.file}. Has: ${had}`);
+    }
     // Bone names match the base mesh exactly, so the tracks need no retarget.
     // What does not match is helper nodes the animation rig carries and the
     // mesh does not; those are dropped, and named here so a real mismatch

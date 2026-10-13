@@ -90,6 +90,37 @@ y no para un juego, y nada en la ficha lo dice a gritos. Lo que hay que buscar:
 cargar el FBX y mirar tres números. Huesos, mallas con piel y animaciones. Si
 cualquiera de los tres es cero, el pack no sirve y no hay nada que negociar.
 
+Y un cuarto, que es el que de verdad decide: **cuántas animaciones y de qué**.
+"Animaciones > 0" deja pasar packs que no sirven. Un creep de este juego
+necesita como mínimo **andar o correr, golpear y morir**; sin ciclo de
+locomoción se desliza por el carril en pose de espera, que es el peor síntoma
+posible y no tiene arreglo en la conversión, porque la animación no existe.
+
+Hay un patrón de empaquetado que lo delata antes de abrir nada. Dos packs
+comprados para este proyecto, del mismo vendedor, venían así:
+
+```
+Animation+Idle.rar      <- UNA animación, y el nombre lo dice
+bicho.obj               <- sin esqueleto, nunca
+bicho.mb                <- escena de Maya, 100 MB
+marmoset scene.tbscene  <- escena de render
+Textures.rar            <- 100-500 MB de TIFF de 4096
+```
+
+Eso es un asset de **ilustración**: existe para renderizarse quieto y bonito.
+El `four hands monster` traía un idle de 5 s y nada más; el `helish dog` una
+única toma de 5 s de movimiento continuo. Los dos tienen malla, esqueleto y
+piel impecables, y los dos son inservibles como creep.
+
+Un pack de **juego** se reconoce al revés, y el demonio es el ejemplo:
+
+```
+SK_Mesh.rar     <- la malla con su esqueleto, sola
+Animation.rar   <- 16 FBX, uno por clip, con el nombre del clip
+Uproject.rar    <- un proyecto de Unreal, que no hace falta pero prueba
+                   que el bicho está pensado para moverse en un motor
+```
+
 Dos ejemplos reales, los dos rechazados en el primer minuto con esta
 comprobación: un arquero de 589.953 triángulos, 0 huesos y 0 animaciones (y
 557.808 de esos triángulos eran solo el pelo), y una araña de 18.170 triángulos,
@@ -222,10 +253,13 @@ fallo que llegó al juego.
 | Mueve los miembros pero **no gira el cuerpo** | Se ha descartado un hueso **estructural**. En este rig `ork_Hips` no mueve ni un vértice (la pelvis está pesada a la columna y a los muslos) pero es la raíz de la que cuelga todo, y el ataque entero es una rotación suya de 360°. Una regla de "conservar huesos con N vértices o más" lo tira. Hay que conservar además **todo ascendiente de un hueso conservado**, aunque no mueva nada |
 | **Arma o escudo flotando**, aunque el hueso cuelgue de la mano | No es el esqueleto: es la pose de bind. `new THREE.Skeleton(bones)` sin matrices inversas llama a `calculateInverses`, que toma como pose de bind el sitio donde estén los huesos en ese momento. Para el cuerpo da igual, porque el cuerpo viene en pose de bind; para un accesorio no, porque se modela en el origen y se coloca en la mano después. En el cruzado 101 de 125 huesos están en bind y los 24 que no son exactamente el escudo, el mango, los doce eslabones, la bola y las puntas de los dedos. Hay que **pasar las inversas del fichero**, tanto al construir el esqueleto como al reconstruirlo tras la reducción. Cuidado con la métrica: medir la distancia del HUESO del arma a la mano no detecta nada, porque los huesos siempre estuvieron bien; hay que medir los **vértices** ya deformados |
 | Una pieza bien texturizada y otra mal, **con el mismo material** | El reparto correcto puede no estar en el FBX. El autor del cruzado dejó un único material sobre las 19 placas de armadura y sobre el mayal y el escudo, y lo corrigió objeto a objeto en el prefab de Unity: 19 renderers con la hoja de cuerpo y 7 con la de arma. Siguiendo el FBX ninguna asignación acierta, y cada una de las dos deja la mitad del personaje bien, que es lo que hace perder horas. La verdad está en el prefab y en los `.mat` y `.meta` del paquete de Unity, que enlazan material y textura por GUID. El conversor reparte por **nombre de malla** con `materialByMesh` |
-| **Sin cara**, o una textura que no corresponde a la pieza | Las texturas de un FBX se muestrean con `flipY = true`: v=0 es la fila de ABAJO de la imagen. El atlas se muestrea con `flipY = false`, donde v=0 es la de arriba, y el remapeo de UV a su casilla es una escala lineal sin volteo. Dibujar la imagen tal cual espeja cada isla en vertical. La cara de la arquera estaba arriba de su textura y su cabeza aterrizaba a 0,7 de la casilla, sobre el pecho: piel sobre piel, que parece mala iluminación y no una búsqueda errónea, y por eso pasó un build. Hay que dibujar cada textura volteada al componer el atlas |
+| **Sin cara**, o una textura que no corresponde a la pieza | Las texturas de un FBX se muestrean con `flipY = true`: v=0 es la fila de ABAJO de la imagen. El atlas se muestrea con `flipY = false`, donde v=0 es la de arriba, y el remapeo de UV a su casilla es una escala lineal sin volteo. Dibujar la imagen tal cual espeja cada isla en vertical. La cara de la arquera estaba arriba de su textura y su cabeza aterrizaba a 0,7 de la casilla, sobre el pecho: piel sobre piel, que parece mala iluminación y no una búsqueda errónea, y por eso pasó un build. Hay que dibujar cada textura volteada al componer el atlas. **Toda** textura, sea cual sea el formato: durante un tiempo solo se volteaba la rama TGA, con el razonamiento de que un PNG "ya viene orientado" — cierto de la imagen y ajeno a la cuestion, que es si v=0 cae en su fila de abajo. El sapo lo destapo: sus UV de cuerpo aterrizaban en el rojo de su propia boca y salia como un borron rosa, con su textura ahi al lado perfectamente morada. El demonio estaba mal igual y nadie lo vio, porque una textura espejada sobre un bicho lleno de bultos parece un bicho lleno de bultos |
 | Un presupuesto de triángulos aplicado a la pieza equivocada | **Los nombres de malla no son de fiar.** En el pack de la arquera, `Eyelashes_Mesh` es la piel (12.570 triángulos) y `Body_Mesh` es el arco (400). Los nombres de material sí correspondían. Para saber qué es cada pieza hay que mirar **tamaño y altura**: el arco mide 136 de largo a la altura del hombro, los ojos miden 10 a la altura de la cara |
 | **Mueve las piernas en el visor y no en la partida** | Dos selectores de clip sobre la misma velocidad con umbrales distintos. `movement.ts` usaba `moveSpeed * 0.75` y `unitView.autoClip` usa `profile.walkSpeed`; coinciden para casi todos los personajes y discrepan en una franja estrecha. La arquera va a 3,22 m/s, justo dentro, y cada selector reiniciaba la acción del otro cada fotograma: 0,08 m de apertura de piernas en vez de 0,61 y un peso de mezcla que nunca pasaba de 0,3. La elección de clip es presentación y vive **en un solo sitio** |
 | **Todo sale duplicado y desplazado**, edificios incluidos | No es del personaje ni del modelo. Cambiar de nivel de calidad cambia el `pixelRatio`, eso redimensiona el búfer del canvas, y los búferes del composer se quedan con el tamaño que tenían la última vez que se llamó a `resize`. Componer 2000x1125 sobre un canvas de 2400x1350 dibuja la escena entera a otra escala. Solo se ve bien el nivel cuyo tope de ratio coincide con esa asignación, y ese nivel es distinto en cada máquina, así que el fallo se achaca al último personaje añadido |
+| El GLB **no carga**, con `Cannot set properties of undefined (setting 'isBone')` | El FBX tiene **más de una raíz de hueso** y solo se exportó una. El conversor subía desde `bones[0]` hasta el hueso más alto y añadía ese subárbol; `bones[0]` es el primer hueso de la primera **submalla**, y en el demonio esa submalla es la espada, cuyo hueso `Gun_Dummy` cuelga del raíz del FBX como hermano de `Bip001`. Resultado: un GLB con 3 nodos, una piel que declara 82 articulaciones y 81 de ellas nulas. El mensaje no nombra nada ni señala a ningún sitio. Hay que añadir **todas** las raíces de hueso, no la que toque. Para verlo sin ejecutar el juego: leer el trozo JSON del GLB y comparar `skins[].joints` con el número de nodos |
+| El exportador falla con **`No valid image data found. Unable to process texture`** | Una submalla de origen cuelga **dentro del árbol de huesos** y se fue con él. El demonio tiene `Pauldron` diez niveles abajo, bajo `Bip001_Pauldron`; las otras seis mallas son hermanas del raíz y por eso un `Group` nuevo las dejaba atrás gratis. La que viaja conserva su material original, que apunta a una textura que el cargador no pudo decodificar. Las originales ya están fundidas en la malla de salida: hay que **desengancharlas** antes de exportar. El mensaje no dice qué malla ni por qué |
+| Las texturas salen grises o el atlas viene vacío | El pack las trae en **TIFF** (o PSD). Ningún navegador los decodifica y el conversor solo sabe de TGA, PNG y JPG. Hay que convertirlas antes de montarlas en `public/_src/tex`; con Pillow son dos líneas, y de paso se bajan de 4096 a 1024 |
 | Se pierden ascendientes al podar el esqueleto | Recorrer la jerarquía **por identidad de objeto** falla: con varios esqueletos el mismo hueso llega como instancias distintas, y entre hueso y hueso hay cuarenta envoltorios. Recorrer **por nombre** y no detenerse en el primer nodo que no sea hueso |
 
 ## 7. Presupuesto
